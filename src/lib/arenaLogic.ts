@@ -1,18 +1,24 @@
 import {
   BOARD_SIZE,
+  CARDINAL_DIRS,
   DIR_DELTA,
   DIRECTIONS,
   MAX_WALK_STEPS,
   PLAYER_HUES,
   STARTING_HP,
+  WEAPON_KINDS,
   type ArenaAction,
+  type CardinalDir,
   type Cell,
   type Direction,
   type GameState,
   type MatchOutcome,
+  type PlanCard,
   type PlaybackEvent,
   type Player,
+  type PublicGameState,
   type RoundStartToken,
+  type WeaponKind,
 } from '../types/game';
 
 export const START_CORNERS: Cell[] = [
@@ -23,6 +29,82 @@ export const START_CORNERS: Cell[] = [
 ];
 
 export const OBSTACLE_COUNT = 3;
+
+export const WEAPON_STATS: Record<WeaponKind, { range: number; damage: number }> = {
+  pistol: { range: Number.POSITIVE_INFINITY, damage: 1 },
+  shotgun: { range: 3, damage: 2 },
+  bomb: { range: 2, damage: 1 },
+  knife: { range: 1, damage: 2 },
+};
+
+const KNIFE_FAN: Record<CardinalDir, Direction[]> = {
+  N: ['NW', 'N', 'NE'],
+  E: ['NE', 'E', 'SE'],
+  S: ['SE', 'S', 'SW'],
+  W: ['SW', 'W', 'NW'],
+};
+
+export function isCardinalDir(value: unknown): value is CardinalDir {
+  return CARDINAL_DIRS.includes(value as CardinalDir);
+}
+
+export function isWeaponKind(value: unknown): value is WeaponKind {
+  return WEAPON_KINDS.includes(value as WeaponKind);
+}
+
+export function formatWeapon(kind: WeaponKind): string {
+  return kind[0].toUpperCase() + kind.slice(1);
+}
+
+export function dealHand(): PlanCard[] {
+  const pool = [...WEAPON_KINDS];
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return [
+    { id: crypto.randomUUID(), kind: 'move' },
+    { id: crypto.randomUUID(), kind: pool[0] },
+    { id: crypto.randomUUID(), kind: pool[1] },
+  ];
+}
+
+export function dealHands(players: Player[]): Player[] {
+  return players.map((player) => ({
+    ...player,
+    planSubmitted: false,
+    hand: isAlive(player) ? dealHand() : [],
+  }));
+}
+
+export function hideOtherHands(players: Player[], viewerId: string): Player[] {
+  return players.map((player) => (player.id === viewerId ? player : { ...player, hand: [] }));
+}
+
+export function viewStateFor(state: GameState, viewerId: string): PublicGameState {
+  const { localPlayerId: _, ...publicState } = state;
+  return {
+    ...publicState,
+    players: hideOtherHands(publicState.players, viewerId),
+  };
+}
+
+export function knifeFanCells(from: Cell, dir: Direction): Cell[] {
+  if (!isCardinalDir(dir)) return [];
+  return KNIFE_FAN[dir]
+    .map((facing) => {
+      const delta = DIR_DELTA[facing];
+      return { row: from.row + delta.dr, col: from.col + delta.dc };
+    })
+    .filter(isOnBoard);
+}
+
+export function bombSplashCells(epicenter: Cell): Cell[] {
+  return CARDINAL_DIRS.map((dir) => {
+    const delta = DIR_DELTA[dir];
+    return { row: epicenter.row + delta.dr, col: epicenter.col + delta.dc };
+  }).filter(isOnBoard);
+}
 
 function chebyshevDistance(a: Cell, b: Cell): number {
   return Math.max(Math.abs(a.row - b.row), Math.abs(a.col - b.col));
@@ -64,7 +146,7 @@ const PLAYBACK_MS: Record<PlaybackEvent['type'], number> = {
   hit: 220,
   death: 280,
   move: 380,
-  blocked: 220,
+  blocked: 400,
 };
 
 export function playerColor(joinOrder: number): string {
@@ -92,12 +174,17 @@ export function isObjectCell(cell: Cell, mapObjects: Cell[]): boolean {
   return mapObjects.some((object) => cellsEqual(object, cell));
 }
 
-export function shotRayCells(from: Cell, dir: Direction, mapObjects: Cell[]): Cell[] {
+export function shotRayCells(
+  from: Cell,
+  dir: Direction,
+  mapObjects: Cell[],
+  maxRange = Number.POSITIVE_INFINITY,
+): Cell[] {
   const { dr, dc } = DIR_DELTA[dir];
   const cells: Cell[] = [];
   let row = from.row + dr;
   let col = from.col + dc;
-  while (isOnBoard({ row, col })) {
+  while (isOnBoard({ row, col }) && cells.length < maxRange) {
     const cell = { row, col };
     cells.push(cell);
     if (isObjectCell(cell, mapObjects)) break;
@@ -169,8 +256,9 @@ function parseAction(value: unknown): ArenaAction | null {
   if (!value || typeof value !== 'object') return null;
   const action = value as ArenaAction;
   if (action.type === 'stay') return { type: 'stay' };
-  if (action.type === 'shoot' && isDirection(action.dir)) {
-    return { type: 'shoot', dir: action.dir };
+  if (action.type === 'shoot' && isWeaponKind(action.weapon) && isDirection(action.dir)) {
+    if (action.weapon === 'knife' && !isCardinalDir(action.dir)) return null;
+    return { type: 'shoot', weapon: action.weapon, dir: action.dir };
   }
   if (action.type === 'walk' && Array.isArray(action.path) && action.path.every(isCell)) {
     return { type: 'walk', path: action.path.map((cell) => ({ row: cell.row, col: cell.col })) };
@@ -178,15 +266,32 @@ function parseAction(value: unknown): ArenaAction | null {
   return null;
 }
 
+function actionMatchesCard(action: ArenaAction, card: PlanCard): boolean {
+  if (card.kind === 'move') return action.type === 'stay' || action.type === 'walk';
+  return action.type === 'shoot' && action.weapon === card.kind;
+}
+
 export function parseAndValidatePlan(
   player: Player,
   actions: unknown,
+  cardIds: unknown,
   mapObjects: Cell[],
 ): [ArenaAction, ArenaAction] | null {
   if (!isAlive(player) || !Array.isArray(actions) || actions.length !== 2) return null;
+  if (!Array.isArray(cardIds) || cardIds.length !== 2) return null;
+  const firstId = cardIds[0];
+  const secondId = cardIds[1];
+  if (typeof firstId !== 'string' || typeof secondId !== 'string') return null;
+
+  const firstCard = player.hand.find((card) => card.id === firstId);
+  const secondCard = player.hand.find((card) => card.id === secondId);
+  if (!firstCard || !secondCard) return null;
+  if (firstId === secondId && firstCard.kind !== 'move') return null;
+
   const first = parseAction(actions[0]);
   const second = parseAction(actions[1]);
   if (!first || !second) return null;
+  if (!actionMatchesCard(first, firstCard) || !actionMatchesCard(second, secondCard)) return null;
 
   let position = { row: player.row, col: player.col };
   for (const action of [first, second]) {
@@ -222,6 +327,7 @@ export function startArenaMatch(state: GameState): GameState {
       row: corner.row,
       col: corner.col,
       planSubmitted: false,
+      hand: dealHand(),
     };
   });
   const mapObjects = generateMapObjects(players.map((player) => ({ row: player.row, col: player.col })));
@@ -257,7 +363,7 @@ export function beginPlanningRound(state: GameState): GameState {
     round: state.round + 1,
     timeline: [],
     roundStart: null,
-    players: state.players.map((player) => ({ ...player, planSubmitted: false })),
+    players: dealHands(state.players),
   };
 }
 
@@ -267,7 +373,10 @@ export function resetPlanningAfterHandoff(state: GameState): GameState {
     turnPhase: state.phase === 'playing' ? 'planning' : state.turnPhase,
     timeline: [],
     roundStart: null,
-    players: state.players.map((player) => ({ ...player, planSubmitted: false })),
+    players: state.phase === 'playing' ? dealHands(state.players) : state.players.map((player) => ({
+      ...player,
+      planSubmitted: false,
+    })),
   };
 }
 
@@ -278,6 +387,7 @@ export function resetArenaPlayers(players: Player[]): Player[] {
     hp: STARTING_HP,
     row: 0,
     col: 0,
+    hand: [],
   }));
 }
 
@@ -316,13 +426,16 @@ function fireShot(
   dir: Direction,
   shooterId: string,
   mapObjects: Cell[],
+  maxRange: number,
 ): { end: Cell; hit?: Player } {
   const { dr, dc } = DIR_DELTA[dir];
   let row = from.row + dr;
   let col = from.col + dc;
   let end = from;
-  while (isOnBoard({ row, col })) {
+  let steps = 0;
+  while (isOnBoard({ row, col }) && steps < maxRange) {
     end = { row, col };
+    steps += 1;
     if (isObjectCell(end, mapObjects)) return { end };
     const hit = occupantAt(players, end, shooterId);
     if (hit) return { end, hit };
@@ -330,6 +443,10 @@ function fireShot(
     col += dc;
   }
   return { end };
+}
+
+function addHit(hits: Map<string, number>, playerId: string, damage: number): void {
+  hits.set(playerId, (hits.get(playerId) ?? 0) + damage);
 }
 
 interface Intent {
@@ -450,6 +567,8 @@ export function resolveRound(
         return action?.type === 'walk' ? action.path.length : 1;
       }),
     );
+    const walkNext = new Map<string, number>();
+    const walkStopped = new Set<string>();
 
     for (let beat = 0; beat < beatCount; beat += 1) {
       timeline.push({ type: 'beat', actionIndex, beat });
@@ -457,16 +576,29 @@ export function resolveRound(
       const intents: Intent[] = movers.map((player) => {
         const action = plans.get(player.id)?.[actionIndex];
         const from = { row: player.row, col: player.col };
-        if (action?.type === 'walk' && action.path[beat] && isOnBoard(action.path[beat])) {
-          const step = action.path[beat];
-          const blocked = isObjectCell(step, mapObjects);
-          const to = !blocked && isAdjacent8(from, step) ? step : from;
-          return { id: player.id, from, to };
+        if (action?.type !== 'walk' || walkStopped.has(player.id)) {
+          return { id: player.id, from, to: from };
         }
-        return { id: player.id, from, to: from };
+        const nextIndex = walkNext.get(player.id) ?? 0;
+        const step = action.path[nextIndex];
+        if (!step || !isOnBoard(step) || isObjectCell(step, mapObjects) || !isAdjacent8(from, step)) {
+          walkStopped.add(player.id);
+          return { id: player.id, from, to: from };
+        }
+        return { id: player.id, from, to: step };
       });
 
       nextPlayers = resolveMovement(nextPlayers, intents, timeline, mapObjects);
+
+      for (const intent of intents) {
+        if (cellsEqual(intent.from, intent.to)) continue;
+        const after = nextPlayers.find((player) => player.id === intent.id);
+        if (after && cellsEqual(after, intent.to)) {
+          walkNext.set(intent.id, (walkNext.get(intent.id) ?? 0) + 1);
+        } else {
+          walkStopped.add(intent.id);
+        }
+      }
 
       if (beat !== 0) continue;
 
@@ -476,16 +608,56 @@ export function resolveRound(
       for (const player of living(snapshot)) {
         const action = plans.get(player.id)?.[actionIndex];
         if (action?.type !== 'shoot') continue;
-        const { end, hit } = fireShot(snapshot, player, action.dir, player.id, mapObjects);
+        const from = { row: player.row, col: player.col };
+
+        if (action.weapon === 'knife') {
+          const fan = knifeFanCells(from, action.dir);
+          const struck = fan
+            .map((cell) => occupantAt(snapshot, cell, player.id))
+            .filter((target): target is Player => Boolean(target));
+          timeline.push({
+            type: 'shot',
+            shooterId: player.id,
+            weapon: 'knife',
+            dir: action.dir,
+            from,
+            end: fan[1] ?? fan[0] ?? from,
+            fan,
+            hitPlayerId: struck[0]?.id,
+          });
+          for (const target of struck) {
+            addHit(hits, target.id, WEAPON_STATS.knife.damage);
+          }
+          continue;
+        }
+
+        const stats = WEAPON_STATS[action.weapon];
+        const { end, hit } = fireShot(
+          snapshot,
+          from,
+          action.dir,
+          player.id,
+          mapObjects,
+          stats.range,
+        );
+        const splash = action.weapon === 'bomb' ? bombSplashCells(end) : undefined;
         timeline.push({
           type: 'shot',
           shooterId: player.id,
+          weapon: action.weapon,
           dir: action.dir,
-          from: { row: player.row, col: player.col },
+          from,
           end,
+          splash,
           hitPlayerId: hit?.id,
         });
-        if (hit) hits.set(hit.id, (hits.get(hit.id) ?? 0) + 1);
+        if (hit) addHit(hits, hit.id, stats.damage);
+        if (splash) {
+          for (const cell of splash) {
+            const splashed = occupantAt(snapshot, cell);
+            if (splashed) addHit(hits, splashed.id, 1);
+          }
+        }
       }
 
       if (hits.size > 0) {
@@ -585,6 +757,6 @@ export function eventDurationMs(event: PlaybackEvent): number {
 export function formatAction(action: ArenaAction | null): string {
   if (!action) return 'Pick one';
   if (action.type === 'stay') return 'Sit tight';
-  if (action.type === 'shoot') return `Shoot ${action.dir}`;
+  if (action.type === 'shoot') return `${formatWeapon(action.weapon)} ${action.dir}`;
   return `Walk ${action.path.length}`;
 }

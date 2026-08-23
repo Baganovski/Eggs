@@ -13,7 +13,7 @@ interface RoomShellProps {
   onAddBot: () => void;
   onRemoveBot: (playerId: string) => void;
   onLeave: () => void;
-  onSubmitPlan: (actions: [ArenaAction, ArenaAction]) => void;
+  onSubmitPlan: (plan: { cardIds: [string, string]; actions: [ArenaAction, ArenaAction] }) => void;
   onReturnToLobby: () => void;
   notice: string | null;
   error: string | null;

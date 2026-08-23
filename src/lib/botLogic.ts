@@ -1,18 +1,22 @@
 import {
+  CARDINAL_DIRS,
   MAX_WALK_STEPS,
   type ArenaAction,
   type Cell,
   type Direction,
   type Player,
+  type WeaponKind,
 } from '../types/game';
 import {
   directionFromRay,
   isAlive,
   isObjectCell,
   isOnBoard,
+  knifeFanCells,
   neighbors8,
   plannedPositionAfter,
   shotRayCells,
+  WEAPON_STATS,
 } from './arenaLogic';
 
 function chebyshev(a: Cell, b: Cell): number {
@@ -38,12 +42,29 @@ function nearestEnemy(from: Cell, others: Player[], selfId: string): Player | nu
   return [...enemies].sort((a, b) => chebyshev(from, a) - chebyshev(from, b))[0] ?? null;
 }
 
-function bestShot(
+function occupantAtCell(players: Player[], cell: Cell, exceptId: string): Player | undefined {
+  return players.find(
+    (player) =>
+      player.id !== exceptId && isAlive(player) && player.row === cell.row && player.col === cell.col,
+  );
+}
+
+function bestShotForWeapon(
   from: Cell,
+  weapon: WeaponKind,
   others: Player[],
   selfId: string,
   mapObjects: Cell[],
 ): Direction | null {
+  if (weapon === 'knife') {
+    for (const dir of CARDINAL_DIRS) {
+      const fan = knifeFanCells(from, dir);
+      if (fan.some((cell) => occupantAtCell(others, cell, selfId))) return dir;
+    }
+    return null;
+  }
+
+  const range = WEAPON_STATS[weapon].range;
   const lined = others
     .filter((player) => player.id !== selfId && isAlive(player))
     .map((player) => ({
@@ -53,13 +74,14 @@ function bestShot(
     }))
     .filter((entry): entry is { player: Player; dir: Direction; dist: number } => {
       if (!entry.dir) return false;
-      const ray = shotRayCells(from, entry.dir, mapObjects);
+      const ray = shotRayCells(from, entry.dir, mapObjects, range);
       const blocked = ray.findIndex((cell) => isObjectCell(cell, mapObjects));
       const target = ray.findIndex(
         (cell) => cell.row === entry.player.row && cell.col === entry.player.col,
       );
       if (target < 0) return false;
-      return blocked < 0 || blocked > target;
+      if (blocked >= 0 && blocked <= target) return false;
+      return true;
     })
     .sort((a, b) => a.dist - b.dist);
   return lined[0]?.dir ?? null;
@@ -98,34 +120,50 @@ function walkToward(
   return { type: 'walk', path };
 }
 
-function pickAction(
+function actionForWeapon(
   from: Cell,
+  weapon: WeaponKind,
   others: Player[],
   selfId: string,
   mapObjects: Cell[],
-): ArenaAction {
-  const enemy = nearestEnemy(from, others, selfId);
-  if (!enemy) return { type: 'stay' };
-
-  const shot = bestShot(from, others, selfId, mapObjects);
-  const range = chebyshev(from, enemy);
-
-  if (shot && range <= 4 && Math.random() < 0.85) {
-    return { type: 'shoot', dir: shot };
-  }
-  if (shot && Math.random() < 0.45) {
-    return { type: 'shoot', dir: shot };
-  }
-  return walkToward(from, enemy, others, selfId, mapObjects);
+): ArenaAction | null {
+  const dir = bestShotForWeapon(from, weapon, others, selfId, mapObjects);
+  if (!dir) return null;
+  return { type: 'shoot', weapon, dir };
 }
 
 export function chooseBotPlan(
   bot: Player,
   players: Player[],
   mapObjects: Cell[],
-): [ArenaAction, ArenaAction] {
-  const first = pickAction(bot, players, bot.id, mapObjects);
-  const after = plannedPositionAfter(bot, first);
-  const second = pickAction(after, players, bot.id, mapObjects);
-  return [first, second];
+): { cardIds: [string, string]; actions: [ArenaAction, ArenaAction] } {
+  const moveCard = bot.hand.find((card) => card.kind === 'move');
+  const actionCards = bot.hand.filter((card) => card.kind !== 'move');
+  const fallbackStay: [ArenaAction, ArenaAction] = [{ type: 'stay' }, { type: 'stay' }];
+  if (!moveCard) {
+    return { cardIds: [bot.hand[0]?.id ?? '', bot.hand[1]?.id ?? ''], actions: fallbackStay };
+  }
+
+  const pickSlot = (from: Cell, usedActionId: string | null): { cardId: string; action: ArenaAction } => {
+    const enemy = nearestEnemy(from, players, bot.id);
+    const unused = actionCards.filter((card) => card.id !== usedActionId);
+    if (enemy) {
+      for (const card of unused) {
+        const shot = actionForWeapon(from, card.kind, players, bot.id, mapObjects);
+        if (shot && Math.random() < 0.8) {
+          return { cardId: card.id, action: shot };
+        }
+      }
+      return { cardId: moveCard.id, action: walkToward(from, enemy, players, bot.id, mapObjects) };
+    }
+    return { cardId: moveCard.id, action: { type: 'stay' } };
+  };
+
+  const first = pickSlot(bot, null);
+  const after = plannedPositionAfter(bot, first.action);
+  const second = pickSlot(after, first.cardId === moveCard.id ? null : first.cardId);
+  return {
+    cardIds: [first.cardId, second.cardId],
+    actions: [first.action, second.action],
+  };
 }

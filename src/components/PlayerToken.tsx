@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { PLAYER_HUES } from '../types/game';
 
 interface PlayerTokenProps {
@@ -7,6 +8,7 @@ interface PlayerTokenProps {
   isDown?: boolean;
   isHit?: boolean;
   isShooting?: boolean;
+  bump?: { dr: number; dc: number };
 }
 
 function Face({ isDown, isHit }: { isDown?: boolean; isHit?: boolean }) {
@@ -48,12 +50,19 @@ export function PlayerToken({
   isDown,
   isHit,
   isShooting,
+  bump,
 }: PlayerTokenProps) {
   return (
     <span
       className={`arena-token${isYou ? ' is-you' : ''}${isDown ? ' is-down' : ''}${
         isHit ? ' is-hit' : ''
-      }${isShooting ? ' is-shooting' : ''}`}
+      }${isShooting ? ' is-shooting' : ''}${bump ? ' is-bump' : ''}`}
+      style={
+        {
+          '--bump-dr': bump?.dr ?? 0,
+          '--bump-dc': bump?.dc ?? 0,
+        } as CSSProperties
+      }
       title={isShooting ? `${name} shooting` : name}
     >
       <svg viewBox="0 0 40 40" aria-hidden="true">

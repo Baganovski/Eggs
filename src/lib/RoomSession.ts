@@ -18,6 +18,8 @@ import {
   resetPlanningAfterHandoff,
   resolveRound,
   STAY_PLAN,
+  hideOtherHands,
+  viewStateFor,
 } from './arenaLogic';
 import { chooseBotPlan } from './botLogic';
 import {
@@ -185,7 +187,11 @@ export class RoomSession {
     const player = this.state.players.find((entry) => entry.id === playerId);
     if (!player?.isBot) return;
     const plan = chooseBotPlan(player, this.state.players, this.state.mapObjects);
-    this.handlePlayerAction(playerId, { type: 'submitPlan', actions: plan });
+    this.handlePlayerAction(playerId, {
+      type: 'submitPlan',
+      cardIds: plan.cardIds,
+      actions: plan.actions,
+    });
   }
 
   private rejectPlan(playerId: string, message: string): void {
@@ -200,7 +206,10 @@ export class RoomSession {
   }
 
   private syncState(): void {
-    this.broadcast({ type: 'stateSync', state: toPublicState(this.state) });
+    for (const [playerId, connection] of this.connections) {
+      if (!connection.open) continue;
+      this.send({ type: 'stateSync', state: viewStateFor(this.state, playerId) }, connection);
+    }
     this.emitState();
   }
 
@@ -253,7 +262,7 @@ export class RoomSession {
     if (!player?.connected || !isAlive(player)) return;
     if (player.planSubmitted || this.pendingPlans.has(playerId)) return;
 
-    const plan = parseAndValidatePlan(player, action.actions, this.state.mapObjects);
+    const plan = parseAndValidatePlan(player, action.actions, action.cardIds, this.state.mapObjects);
     if (!plan) {
       this.rejectPlan(playerId, 'That plan is not legal.');
       return;
@@ -271,7 +280,10 @@ export class RoomSession {
   }
 
   private emitState(): void {
-    this.callbacks.onStateChange({ ...this.state, players: [...this.state.players] });
+    this.callbacks.onStateChange({
+      ...viewStateFor(this.state, this.state.localPlayerId),
+      localPlayerId: this.state.localPlayerId,
+    });
   }
 
   private emitNotice(message: string): void {
@@ -443,7 +455,10 @@ export class RoomSession {
       case 'requestState':
         if (this.isHost) {
           this.mapConnectionToPlayer(connection, message.playerId);
-          this.broadcast({ type: 'stateSync', state: toPublicState(this.state) });
+          this.send(
+            { type: 'stateSync', state: viewStateFor(this.state, message.playerId) },
+            connection,
+          );
           this.emitState();
         }
         break;
@@ -525,10 +540,7 @@ export class RoomSession {
       {
         type: 'joinAck',
         playerId: nextPlayer.id,
-        state: toPublicState({
-          ...this.state,
-          localPlayerId: nextPlayer.id,
-        }),
+        state: viewStateFor(this.state, nextPlayer.id),
       },
       connection,
     );
@@ -608,11 +620,16 @@ export class RoomSession {
     this.state.players = this.state.players.map((entry) =>
       entry.id === playerId ? markDisconnected(entry) : entry,
     );
-    this.broadcast({
-      type: 'playerLeft',
-      playerId,
-      players: [...this.state.players],
-    });
+    for (const [viewerId, connection] of this.connections) {
+      this.send(
+        {
+          type: 'playerLeft',
+          playerId,
+          players: hideOtherHands([...this.state.players], viewerId),
+        },
+        connection,
+      );
+    }
     if (this.state.phase !== 'lobby') {
       this.emitNotice(`${player.name} left the match.`);
     }

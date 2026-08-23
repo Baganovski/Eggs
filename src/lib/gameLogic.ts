@@ -26,6 +26,7 @@ export function createInitialPlayer(
     hp: STARTING_HP,
     row: 0,
     col: 0,
+    hand: [],
   };
 }
 
@@ -89,6 +90,7 @@ export function createBotPlayer(joinOrder: number, existingNames: string[]): Pla
     hp: STARTING_HP,
     row: 0,
     col: 0,
+    hand: [],
   };
 }
 

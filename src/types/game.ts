@@ -7,6 +7,9 @@ export const MAX_WALK_STEPS = 3;
 export const DIRECTIONS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
 export type Direction = (typeof DIRECTIONS)[number];
 
+export const CARDINAL_DIRS = ['N', 'E', 'S', 'W'] as const;
+export type CardinalDir = (typeof CARDINAL_DIRS)[number];
+
 export const DIR_DELTA: Record<Direction, { dr: number; dc: number }> = {
   N: { dr: -1, dc: 0 },
   NE: { dr: -1, dc: 1 },
@@ -17,6 +20,13 @@ export const DIR_DELTA: Record<Direction, { dr: number; dc: number }> = {
   W: { dr: 0, dc: -1 },
   NW: { dr: -1, dc: -1 },
 };
+
+export const WEAPON_KINDS = ['pistol', 'shotgun', 'bomb', 'knife'] as const;
+export type WeaponKind = (typeof WEAPON_KINDS)[number];
+
+export type PlanCard =
+  | { id: string; kind: 'move' }
+  | { id: string; kind: WeaponKind };
 
 export const PLAYER_HUES = ['#e23b3b', '#3b6cf0', '#3cbf4a', '#ffe14a'] as const;
 
@@ -30,7 +40,7 @@ export interface Cell {
 
 export type ArenaAction =
   | { type: 'stay' }
-  | { type: 'shoot'; dir: Direction }
+  | { type: 'shoot'; weapon: WeaponKind; dir: Direction }
   | { type: 'walk'; path: Cell[] };
 
 export type MatchOutcome =
@@ -44,9 +54,12 @@ export type PlaybackEvent =
   | {
       type: 'shot';
       shooterId: string;
+      weapon: WeaponKind;
       dir: Direction;
       from: Cell;
       end: Cell;
+      fan?: Cell[];
+      splash?: Cell[];
       hitPlayerId?: string;
     }
   | { type: 'hit'; playerId: string; hpAfter: number }
@@ -77,6 +90,7 @@ export interface Player {
   hp: number;
   row: number;
   col: number;
+  hand: PlanCard[];
 }
 
 export interface GameState {
@@ -97,7 +111,7 @@ export interface GameState {
 export type PublicGameState = Omit<GameState, 'localPlayerId'>;
 
 export type PlayerAction =
-  | { type: 'submitPlan'; actions: [ArenaAction, ArenaAction] }
+  | { type: 'submitPlan'; cardIds: [string, string]; actions: [ArenaAction, ArenaAction] }
   | { type: 'endMatch' }
   | { type: 'returnToLobby' };
 
