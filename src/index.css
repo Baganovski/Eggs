@@ -477,6 +477,7 @@ h2 {
   border: 3px solid var(--ink);
   border-radius: 18px;
   box-shadow: var(--shadow);
+  overflow: visible;
 }
 
 .arena-board {
@@ -488,6 +489,7 @@ h2 {
 
 .arena-cell {
   position: relative;
+  overflow: visible;
   aspect-ratio: 1;
   border: 0;
   border-right: 2px solid var(--ink);
@@ -577,6 +579,8 @@ h2 {
   align-items: center;
   justify-content: center;
   color: var(--ink);
+  transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%));
+  transition: transform 180ms ease-out;
 }
 
 .arena-token svg {
@@ -596,7 +600,12 @@ h2 {
 }
 
 .arena-token.is-hit {
-  transform: scale(1.12) rotate(-8deg);
+  transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%))
+    scale(1.12) rotate(-8deg);
+}
+
+.arena-token.is-bump {
+  z-index: 3;
 }
 
 .arena-token.is-shooting {
@@ -643,6 +652,7 @@ h2 {
 }
 
 .action-slots,
+.hand-row,
 .mode-row,
 .planner-tools {
   display: grid;
@@ -650,8 +660,47 @@ h2 {
   gap: 8px;
 }
 
+.hand-row,
 .mode-row {
   grid-template-columns: 1fr 1fr 1fr;
+}
+
+.plan-card {
+  border: 3px solid var(--ink);
+  background: #fff;
+  border-radius: 16px;
+  padding: 10px;
+  cursor: pointer;
+  text-align: left;
+  font-weight: 800;
+  box-shadow: var(--shadow);
+}
+
+.plan-card-label {
+  display: block;
+  font-size: 0.72rem;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 800;
+}
+
+.plan-card.is-selected {
+  background: var(--orange);
+  color: var(--ink);
+}
+
+.plan-card.is-spent,
+.plan-card:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.plan-card.is-selected:disabled {
+  opacity: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow);
 }
 
 .planner-actions {
@@ -725,6 +774,7 @@ h2 {
 
 .planner-actions .btn,
 .planner-tools .btn,
+.hand-row .plan-card,
 .mode-row .btn {
   margin-top: 0;
   width: auto;

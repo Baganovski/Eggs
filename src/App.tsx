@@ -46,7 +46,7 @@ export function App() {
         onAddBot={addBot}
         onRemoveBot={removeBot}
         onLeave={leaveRoom}
-        onSubmitPlan={(actions) => sendPlayerAction({ type: 'submitPlan', actions })}
+        onSubmitPlan={(plan) => sendPlayerAction({ type: 'submitPlan', ...plan })}
         onReturnToLobby={() => sendPlayerAction({ type: 'returnToLobby' })}
         notice={notice}
         error={error}
@@ -74,14 +74,12 @@ export function App() {
         <header className="home-hero">
           <svg className="home-doodle" viewBox="0 0 48 48" aria-hidden="true">
             <path
-              d="M6 24 C14 10 34 10 42 24 C34 38 14 38 6 24 Z"
+              d="M24 4 L28 16 L40 10 L32 22 L46 24 L32 26 L40 38 L28 32 L24 44 L20 32 L8 38 L16 26 L2 24 L16 22 L8 10 L20 16 Z"
               fill="#ffe14a"
               stroke="#111"
-              strokeWidth="3"
+              strokeWidth="2.4"
               strokeLinejoin="round"
             />
-            <circle cx="24" cy="24" r="8" fill="#fff" stroke="#111" strokeWidth="2.4" />
-            <circle cx="24" cy="24" r="4" fill="#111" />
           </svg>
           <h1 className="brand">BEAT</h1>
           <p className="home-lede">3 HP, 2 Moves, 1 Beat</p>

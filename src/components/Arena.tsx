@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import {
   BOARD_SIZE,
   DIR_DELTA,
@@ -7,41 +7,51 @@ import {
   type ArenaAction,
   type Cell,
   type GameState,
+  type PlanCard,
   type PlaybackEvent,
   type RoundStartToken,
 } from '../types/game';
 import {
+  bombSplashCells,
   cellsEqual,
   directionFromRay,
   eventDurationMs,
   formatAction,
+  formatWeapon,
   groupTimeline,
   isAdjacent8,
   isAlive,
+  isCardinalDir,
   isObjectCell,
   isOnBoard,
+  knifeFanCells,
   neighbors8,
   parseAndValidatePlan,
   plannedPositionAfter,
   playerColor,
   shotRayCells,
+  WEAPON_STATS,
 } from '../lib/arenaLogic';
 import { PlayerToken } from './PlayerToken';
 
 interface ArenaProps {
   state: GameState;
   isHost: boolean;
-  onSubmitPlan: (actions: [ArenaAction, ArenaAction]) => void;
+  onSubmitPlan: (plan: { cardIds: [string, string]; actions: [ArenaAction, ArenaAction] }) => void;
   onReturnToLobby: () => void;
 }
 
-type PlanMode = 'stay' | 'walk' | 'shoot';
 type OverlayTone = 'active' | 'muted';
 
 interface Beam {
   from: Cell;
   end: Cell;
   shooterId: string;
+}
+
+interface TokenBump {
+  dr: number;
+  dc: number;
 }
 
 interface Token {
@@ -111,6 +121,36 @@ function shotCaption(tokens: Token[], frame: PlaybackEvent[], actionIndex: numbe
   return `Move ${actionIndex + 1} · ${labels.join(' · ')}`;
 }
 
+const WALK_STEPS_AFTER_SIT = 2;
+
+function planBeatNumbers(
+  start: Cell,
+  actions: [ArenaAction | null, ArenaAction | null],
+  leadSit: [boolean, boolean] = [false, false],
+): Map<string, number> {
+  const numbers = new Map<string, number>();
+  let n = 0;
+  let pos = start;
+  for (let index = 0; index < actions.length; index += 1) {
+    const action = actions[index];
+    if (!action) break;
+    if (action.type === 'stay' || (action.type === 'walk' && leadSit[index])) {
+      n += 1;
+      numbers.set(`${pos.row},${pos.col}`, n);
+    }
+    if (action.type === 'walk') {
+      for (const step of action.path) {
+        n += 1;
+        numbers.set(`${step.row},${step.col}`, n);
+        pos = step;
+      }
+    } else if (action.type === 'shoot') {
+      n += 1;
+    }
+  }
+  return numbers;
+}
+
 function applyEvent(tokens: Token[], event: PlaybackEvent): Token[] {
   switch (event.type) {
     case 'move':
@@ -132,6 +172,7 @@ async function runPlayback(options: {
   cancelled: () => boolean;
   setTokens: (tokens: Token[]) => void;
   setBeams: (beams: Beam[]) => void;
+  setBumps: (bumps: Record<string, TokenBump>) => void;
   setFlashIds: (ids: string[]) => void;
   setShootingIds: (ids: string[]) => void;
   setStatus: (status: string) => void;
@@ -144,12 +185,14 @@ async function runPlayback(options: {
     if (first.type === 'actionStart') {
       actionIndex = first.actionIndex;
       options.setShootingIds([]);
+      options.setBumps({});
       options.setStatus(`Move ${actionIndex + 1}`);
     } else if (first.type === 'beat') {
       actionIndex = first.actionIndex;
       options.setBeams([]);
       options.setFlashIds([]);
       options.setShootingIds([]);
+      options.setBumps({});
       options.setStatus(`Move ${actionIndex + 1} · step ${first.beat + 1}`);
     } else if (first.type === 'shot') {
       const shots = frame.flatMap((event) =>
@@ -167,8 +210,37 @@ async function runPlayback(options: {
         ),
       );
     }
+
+    const blocked = frame.flatMap((event) => (event.type === 'blocked' ? [event] : []));
     current = frame.reduce(applyEvent, current);
     options.setTokens(current);
+
+    if (blocked.length > 0) {
+      const names = blocked.map((event) => {
+        const name = current.find((token) => token.id === event.playerId)?.name ?? 'Someone';
+        return name;
+      });
+      options.setStatus(`Move ${actionIndex + 1} · ${names.join(' · ')} bounce`);
+      options.setBumps(
+        Object.fromEntries(
+          blocked.map((event) => [
+            event.playerId,
+            {
+              dr: event.attempted.row - event.from.row,
+              dc: event.attempted.col - event.from.col,
+            },
+          ]),
+        ),
+      );
+      const duration = Math.max(...frame.map(eventDurationMs));
+      await sleep(duration / 2);
+      if (options.cancelled()) return;
+      options.setBumps({});
+      await sleep(duration / 2);
+      if (options.cancelled()) return;
+      continue;
+    }
+
     const duration = Math.max(...frame.map(eventDurationMs));
     if (duration > 0) await sleep(duration);
     if (options.cancelled()) return;
@@ -196,11 +268,14 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
   const planning = state.phase === 'playing' && state.turnPhase === 'planning';
 
   const [draft, setDraft] = useState<[ArenaAction | null, ArenaAction | null]>([null, null]);
+  const [slotCards, setSlotCards] = useState<[string | null, string | null]>([null, null]);
+  const [pendingSit, setPendingSit] = useState<[boolean, boolean]>([false, false]);
+  const [leadSit, setLeadSit] = useState<[boolean, boolean]>([false, false]);
   const [slot, setSlot] = useState<0 | 1>(0);
-  const [mode, setMode] = useState<PlanMode>('walk');
   const [localLocked, setLocalLocked] = useState(false);
   const [tokens, setTokens] = useState<Token[]>(() => tokensFromState(state));
   const [beams, setBeams] = useState<Beam[]>([]);
+  const [bumps, setBumps] = useState<Record<string, TokenBump>>({});
   const [flashIds, setFlashIds] = useState<string[]>([]);
   const [shootingIds, setShootingIds] = useState<string[]>([]);
   const [replayDone, setReplayDone] = useState(true);
@@ -211,8 +286,10 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
 
   useEffect(() => {
     setDraft([null, null]);
+    setSlotCards([null, null]);
+    setPendingSit([false, false]);
+    setLeadSit([false, false]);
     setSlot(0);
-    setMode('walk');
     setLocalLocked(false);
   }, [state.round, local?.id]);
 
@@ -221,6 +298,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     if (watchingLast) return;
     setTokens(tokensFromState(state));
     setBeams([]);
+    setBumps({});
     setFlashIds([]);
     setShootingIds([]);
     setReplayDone(true);
@@ -243,6 +321,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     setReplayDone(false);
     setTokens(tokensFromSnapshot(state, state.roundStart));
     setBeams([]);
+    setBumps({});
     setFlashIds([]);
     setShootingIds([]);
 
@@ -253,6 +332,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         cancelled: () => cancelled,
         setTokens,
         setBeams,
+        setBumps,
         setFlashIds,
         setShootingIds,
         setStatus,
@@ -260,6 +340,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
       if (cancelled) return;
       setTokens(tokensFromState(state));
       setBeams([]);
+      setBumps({});
       setFlashIds([]);
       setShootingIds([]);
       setStatus('');
@@ -279,27 +360,60 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     return plannedPositionAfter(start, draft[0]);
   }, [local, slot, draft]);
 
+  const selectedCard = local?.hand.find((card) => card.id === slotCards[slot]);
+  const editingMove = selectedCard?.kind === 'move';
+  const editingShoot = Boolean(selectedCard && selectedCard.kind !== 'move');
+
+  const isMoveCard = (cardId: string | null) =>
+    Boolean(cardId && local?.hand.find((card) => card.id === cardId)?.kind === 'move');
+
+  const sittingSlot = (index: 0 | 1) =>
+    pendingSit[index] || draft[index]?.type === 'stay';
+
+  const resolvedDraft = useMemo<[ArenaAction | null, ArenaAction | null]>(() => {
+    const resolve = (index: 0 | 1): ArenaAction | null => {
+      if (draft[index]) return draft[index];
+      if (pendingSit[index] && isMoveCard(slotCards[index])) return { type: 'stay' };
+      return null;
+    };
+    return [resolve(0), resolve(1)];
+  }, [draft, pendingSit, slotCards, local?.hand]);
+
+  const maxWalkFor = (index: 0 | 1) => {
+    if (leadSit[index] || sittingSlot(index)) return WALK_STEPS_AFTER_SIT;
+    if (index === 1 && sittingSlot(0)) return WALK_STEPS_AFTER_SIT;
+    return MAX_WALK_STEPS;
+  };
+
   const walkPath = draft[slot]?.type === 'walk' ? draft[slot].path : [];
   const walkTip = walkPath[walkPath.length - 1] ?? origin;
   const validWalk =
-    canPlan && mode === 'walk'
+    canPlan && editingMove && walkPath.length < maxWalkFor(slot)
       ? neighbors8(walkTip).filter((cell) => !isObjectCell(cell, state.mapObjects))
       : [];
 
   const walkTones = useMemo(() => {
     const tones = new Map<string, OverlayTone>();
+    if (!local) return tones;
+    const start = { row: local.row, col: local.col };
     ([0, 1] as const).forEach((index) => {
-      const action = draft[index];
-      if (action?.type !== 'walk') return;
-      const editingThisWalk = slot === index && mode === 'walk';
-      const tone: OverlayTone = editingThisWalk ? 'active' : 'muted';
-      for (const cell of action.path) {
+      const action = resolvedDraft[index];
+      if (!action) return;
+      const editingThis = slot === index && editingMove;
+      const tone: OverlayTone = editingThis ? 'active' : 'muted';
+      const mark = (cell: Cell) => {
         const key = `${cell.row},${cell.col}`;
         if (tone === 'active' || tones.get(key) !== 'active') tones.set(key, tone);
+      };
+      const from = index === 0 ? start : plannedPositionAfter(start, resolvedDraft[0]);
+      if (action.type === 'stay' || (action.type === 'walk' && leadSit[index])) {
+        mark(from);
       }
+      if (action.type !== 'walk') return;
+      for (const cell of action.path) mark(cell);
     });
     return tones;
-  }, [draft, slot, mode]);
+  }, [resolvedDraft, slot, editingMove, local, leadSit]);
 
   const aimTones = useMemo(() => {
     const tones = new Map<string, OverlayTone>();
@@ -309,83 +423,185 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
       const action = draft[index];
       if (action?.type !== 'shoot') return;
       const from = index === 0 ? start : plannedPositionAfter(start, draft[0]);
-      const editingThisShot = slot === index && mode === 'shoot';
+      const editingThisShot = slot === index && editingShoot;
       const tone: OverlayTone = editingThisShot ? 'active' : 'muted';
-      for (const cell of shotRayCells(from, action.dir, state.mapObjects)) {
+      const mark = (cell: Cell) => {
         const key = `${cell.row},${cell.col}`;
         if (tone === 'active' || tones.get(key) !== 'active') tones.set(key, tone);
+      };
+      if (action.weapon === 'knife') {
+        for (const cell of knifeFanCells(from, action.dir)) mark(cell);
+        return;
       }
+      const ray = shotRayCells(from, action.dir, state.mapObjects, WEAPON_STATS[action.weapon].range);
+      if (action.weapon === 'bomb') {
+        const end = ray[ray.length - 1];
+        if (end) {
+          mark(end);
+          for (const cell of bombSplashCells(end)) mark(cell);
+        }
+        return;
+      }
+      for (const cell of ray) mark(cell);
     });
     return tones;
-  }, [draft, slot, local, mode, state.mapObjects]);
+  }, [draft, slot, local, editingShoot, state.mapObjects]);
 
-  const legalPlan = local ? parseAndValidatePlan(local, draft, state.mapObjects) : null;
+  const cardIds: [string, string] | null =
+    slotCards[0] && slotCards[1] ? [slotCards[0], slotCards[1]] : null;
+  const legalPlan =
+    local && cardIds ? parseAndValidatePlan(local, resolvedDraft, cardIds, state.mapObjects) : null;
+  const beatNumbers = useMemo(() => {
+    if (!local) return new Map<string, number>();
+    return planBeatNumbers({ row: local.row, col: local.col }, resolvedDraft, leadSit);
+  }, [local, resolvedDraft, leadSit]);
   const livingCount = state.players.filter(isAlive).length;
   const submittedCount =
     state.players.filter((player) => isAlive(player) && player.planSubmitted).length +
     (localLocked && localAlive && !local?.planSubmitted ? 1 : 0);
 
+  const setFlag = (
+    setter: Dispatch<SetStateAction<[boolean, boolean]>>,
+    index: 0 | 1,
+    value: boolean,
+  ) => {
+    setter((current) => {
+      if (current[index] === value) return current;
+      const next: [boolean, boolean] = [...current];
+      next[index] = value;
+      return next;
+    });
+  };
+
   const setAction = (index: 0 | 1, action: ArenaAction | null) => {
+    if (action?.type === 'walk' || action?.type === 'shoot' || action === null) {
+      setFlag(setPendingSit, index, false);
+    }
+    if (action === null || action.type === 'stay' || action.type === 'shoot') {
+      setFlag(setLeadSit, index, false);
+    }
+    let clearSecondCard = false;
     setDraft((current) => {
       const next: [ArenaAction | null, ArenaAction | null] = [...current];
       next[index] = action;
       if (index === 0 && current[1]?.type === 'walk' && local) {
         const start = { row: local.row, col: local.col };
         const after = plannedPositionAfter(start, action);
-        if (!parseAndValidatePlan(local, [action, current[1]], state.mapObjects)) {
+        const firstStep = current[1].path[0];
+        if (!firstStep || !isAdjacent8(after, firstStep)) {
           next[1] = null;
-        } else if (current[1].path[0] && !isAdjacent8(after, current[1].path[0])) {
-          next[1] = null;
+          clearSecondCard = true;
         }
       }
       return next;
     });
+    if (clearSecondCard) {
+      setSlotCards((current) => [current[0], null]);
+      setFlag(setPendingSit, 1, false);
+      setFlag(setLeadSit, 1, false);
+    }
   };
 
-  const chooseMode = (nextMode: PlanMode) => {
+  const commitLeavingSlot = (index: 0 | 1) => {
+    if (!pendingSit[index] || draft[index]) return;
+    setAction(index, { type: 'stay' });
+  };
+
+  const goToSlot = (nextSlot: 0 | 1) => {
+    if (nextSlot !== slot) commitLeavingSlot(slot);
+    setSlot(nextSlot);
+  };
+
+  const chooseCard = (card: PlanCard) => {
+    if (!canPlan) return;
+    const other = slot === 0 ? 1 : 0;
+    if (card.kind !== 'move' && slotCards[other] === card.id) return;
+
     const current = draft[slot];
+    const slotFilled = current !== null || pendingSit[slot];
     const firstFilled =
-      slot === 0 && current !== null && current.type !== nextMode && draft[1] === null;
+      slot === 0 && slotFilled && slotCards[0] !== card.id && draft[1] === null && !pendingSit[1];
 
     if (firstFilled) {
+      commitLeavingSlot(0);
       setSlot(1);
-      setMode(nextMode);
-      if (nextMode === 'stay') setAction(1, { type: 'stay' });
-      else setAction(1, null);
+      setSlotCards((ids) => [ids[0], card.id]);
+      setAction(1, null);
       return;
     }
 
-    setMode(nextMode);
-    if (nextMode === 'stay') setAction(slot, { type: 'stay' });
-    if (nextMode === 'walk' && current?.type !== 'walk') setAction(slot, null);
-    if (nextMode === 'shoot' && current?.type !== 'shoot') setAction(slot, null);
+    setSlotCards((ids) => {
+      const next: [string | null, string | null] = [...ids];
+      next[slot] = card.id;
+      return next;
+    });
+    if (card.kind === 'move') {
+      if (current?.type === 'shoot') setAction(slot, null);
+    } else if (current?.type !== 'shoot' || current.weapon !== card.kind) {
+      setAction(slot, null);
+    }
   };
 
   const handleCellClick = (cell: Cell) => {
-    if (!canPlan) return;
-    if (mode === 'walk') {
-      if (walkPath.length >= MAX_WALK_STEPS) return;
+    if (!canPlan || !selectedCard) return;
+    if (selectedCard.kind === 'move') {
+      if (cellsEqual(cell, origin)) {
+        if (draft[slot]?.type === 'walk') {
+          if (walkPath.length >= maxWalkFor(slot)) return;
+          if (!isAdjacent8(walkTip, cell) || isObjectCell(cell, state.mapObjects)) return;
+          setAction(slot, { type: 'walk', path: [...walkPath, cell] });
+          return;
+        }
+        setFlag(setPendingSit, slot, true);
+        return;
+      }
+      if (sittingSlot(slot)) {
+        if (!isAdjacent8(origin, cell) || !isOnBoard(cell) || isObjectCell(cell, state.mapObjects)) {
+          return;
+        }
+        setFlag(setLeadSit, slot, true);
+        setAction(slot, { type: 'walk', path: [cell] });
+        return;
+      }
+      if (walkPath.length >= maxWalkFor(slot)) return;
       if (!isAdjacent8(walkTip, cell) || !isOnBoard(cell) || isObjectCell(cell, state.mapObjects)) {
         return;
       }
       setAction(slot, { type: 'walk', path: [...walkPath, cell] });
       return;
     }
-    if (mode === 'shoot') {
+
+    if (selectedCard.kind === 'knife') {
       const dir = directionFromRay(origin, cell);
-      if (dir) setAction(slot, { type: 'shoot', dir });
+      if (dir && isCardinalDir(dir)) {
+        setAction(slot, { type: 'shoot', weapon: 'knife', dir });
+      }
+      return;
     }
+
+    const dir = directionFromRay(origin, cell);
+    if (!dir) return;
+    const ray = shotRayCells(origin, dir, state.mapObjects, WEAPON_STATS[selectedCard.kind].range);
+    if (!ray.some((step) => cellsEqual(step, cell))) return;
+    setAction(slot, { type: 'shoot', weapon: selectedCard.kind, dir });
   };
 
   const resetAction = () => {
     if (!canPlan) return;
     setAction(slot, null);
+    setFlag(setPendingSit, slot, false);
+    setFlag(setLeadSit, slot, false);
+    setSlotCards((ids) => {
+      const next: [string | null, string | null] = [...ids];
+      next[slot] = null;
+      return next;
+    });
   };
 
   const lockIn = () => {
-    if (!legalPlan) return;
+    if (!legalPlan || !slotCards[0] || !slotCards[1]) return;
     setLocalLocked(true);
-    onSubmitPlan(legalPlan);
+    onSubmitPlan({ cardIds: [slotCards[0], slotCards[1]], actions: legalPlan });
   };
 
   const watchLastTurn = () => {
@@ -396,6 +612,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     setWatchingLast(true);
     setReplayDone(false);
     setBeams([]);
+    setBumps({});
     setFlashIds([]);
     setShootingIds([]);
     const startTokens = tokensFromSnapshot(state, replay.roundStart);
@@ -407,6 +624,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         cancelled: () => watchGen.current !== gen,
         setTokens,
         setBeams,
+        setBumps,
         setFlashIds,
         setShootingIds,
         setStatus,
@@ -414,6 +632,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
       if (watchGen.current !== gen) return;
       setTokens(tokensFromState(state));
       setBeams([]);
+      setBumps({});
       setFlashIds([]);
       setShootingIds([]);
       setStatus('');
@@ -440,11 +659,17 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         ? status || 'Watching the last round…'
         : !planning
           ? status || 'Watching the grid…'
-          : mode === 'stay'
-            ? 'Stay put this beat. They might walk into you.'
-            : mode === 'walk'
-              ? 'Tap any of the 8 neighbors. Up to 3 steps. Walls block movement and shots.'
-              : 'Tap a cell on the line you want. The ray lights up on the grid.';
+          : selectedCard?.kind === 'move'
+            ? 'Tap yourself to sit, then up to 2 squares to walk this move. Sit locks only if you open the next move or lock in. Walls block movement and shots.'
+            : selectedCard?.kind === 'knife'
+              ? 'Tap north, east, south, or west. The knife hits the three squares in that facing. Two damage.'
+              : selectedCard?.kind === 'bomb'
+                ? 'Tap a cell on the line, up to 2 squares. The bomb hits that cell and the four cardinal neighbors.'
+                : selectedCard?.kind === 'shotgun'
+                  ? 'Tap a cell on the line, up to 3 squares. Two damage.'
+                  : selectedCard?.kind === 'pistol'
+                    ? 'Tap a cell on the line you want. Unlimited range, one damage.'
+                    : 'Pick a card for this move.';
 
   const showPlanner = state.phase === 'playing';
 
@@ -512,17 +737,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             const cellKey = `${row},${col}`;
             const walkTone = walkTones.get(cellKey);
             const aimTone = aimTones.get(cellKey);
-            const pathIndex = (() => {
-              const firstPath = draft[0]?.type === 'walk' ? draft[0].path : [];
-              const secondPath = draft[1]?.type === 'walk' ? draft[1].path : [];
-              const firstIdx = firstPath.findIndex((step) => cellsEqual(step, cell));
-              const secondIdx = secondPath.findIndex((step) => cellsEqual(step, cell));
-              const editingSecond = slot === 1 && mode === 'walk';
-              if (editingSecond && secondIdx >= 0) return firstPath.length + secondIdx;
-              if (firstIdx >= 0) return firstIdx;
-              if (secondIdx >= 0) return firstPath.length + secondIdx;
-              return -1;
-            })();
+            const pathIndex = beatNumbers.get(cellKey) ?? 0;
             const isValid = validWalk.some((step) => cellsEqual(step, cell));
             const isOrigin = canPlan && cellsEqual(origin, cell);
             const hasBlock = isObjectCell(cell, state.mapObjects);
@@ -555,7 +770,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                 onClick={() => handleCellClick(cell)}
                 disabled={!canPlan}
               >
-                {pathIndex >= 0 && <span className="path-index">{pathIndex + 1}</span>}
+                {pathIndex > 0 && <span className="path-index">{pathIndex}</span>}
                 {hasBlock && <BlockMark />}
                 {occupants.map((token) => (
                   <PlayerToken
@@ -566,6 +781,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                     isDown={token.hp <= 0}
                     isHit={flashIds.includes(token.id)}
                     isShooting={shootingIds.includes(token.id)}
+                    bump={bumps[token.id]}
                   />
                 ))}
               </button>
@@ -583,43 +799,36 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                 type="button"
                 className={`action-slot${slot === index ? ' is-active' : ''}`}
                 disabled={!canPlan}
-                onClick={() => {
-                  setSlot(index);
-                  const action = draft[index];
-                  setMode(action?.type ?? 'walk');
-                }}
+                onClick={() => goToSlot(index)}
               >
                 <span className="action-slot-label">Move {index + 1}</span>
-                <span>{formatAction(draft[index])}</span>
+                <span>{formatAction(resolvedDraft[index])}</span>
               </button>
             ))}
           </div>
 
-          <div className="mode-row">
-            <button
-              type="button"
-              className={`btn btn-secondary${mode === 'stay' ? ' is-selected' : ''}`}
-              disabled={!canPlan}
-              onClick={() => chooseMode('stay')}
-            >
-              Sit
-            </button>
-            <button
-              type="button"
-              className={`btn btn-secondary${mode === 'walk' ? ' is-selected' : ''}`}
-              disabled={!canPlan}
-              onClick={() => chooseMode('walk')}
-            >
-              Walk
-            </button>
-            <button
-              type="button"
-              className={`btn btn-secondary${mode === 'shoot' ? ' is-selected' : ''}`}
-              disabled={!canPlan}
-              onClick={() => chooseMode('shoot')}
-            >
-              Shoot
-            </button>
+          <div className="hand-row">
+            {(local?.hand ?? []).map((card, cardIndex) => {
+              const other = slot === 0 ? 1 : 0;
+              const usedElsewhere = card.kind !== 'move' && slotCards[other] === card.id;
+              const selected = slotCards[slot] === card.id;
+              const label = card.kind === 'move' ? 'Move' : `Action ${cardIndex}`;
+              const title = card.kind === 'move' ? 'Move' : formatWeapon(card.kind);
+              return (
+                <button
+                  key={card.id}
+                  type="button"
+                  className={`plan-card${selected ? ' is-selected' : ''}${
+                    usedElsewhere ? ' is-spent' : ''
+                  }`}
+                  disabled={!canPlan || usedElsewhere}
+                  onClick={() => chooseCard(card)}
+                >
+                  <span className="plan-card-label">{label}</span>
+                  <span>{title}</span>
+                </button>
+              );
+            })}
           </div>
 
           <p className="arena-hint">{plannerHint}</p>
