@@ -1,4 +1,15 @@
-import type { GameState, Player, PlayerAction } from '../types/game';
+import {
+  MAX_PLAYERS,
+  STARTING_HP,
+  type GameState,
+  type Player,
+  type PlayerAction,
+} from '../types/game';
+import {
+  emptyArenaFields,
+  resetArenaPlayers,
+  startArenaMatch,
+} from './arenaLogic';
 
 export function createInitialPlayer(
   id: string,
@@ -9,8 +20,12 @@ export function createInitialPlayer(
     id,
     name,
     connected: true,
+    isBot: false,
     joinOrder,
-    ready: false,
+    planSubmitted: false,
+    hp: STARTING_HP,
+    row: 0,
+    col: 0,
   };
 }
 
@@ -22,6 +37,7 @@ export function createHostLobbyState(
   return {
     roomCode,
     phase: 'lobby',
+    ...emptyArenaFields(),
     players: [createInitialPlayer(playerId, playerName, 0)],
     hostPlayerId: playerId,
     localPlayerId: playerId,
@@ -32,6 +48,7 @@ export function createJoinerLobbyState(roomCode: string, playerId: string): Game
   return {
     roomCode,
     phase: 'lobby',
+    ...emptyArenaFields(),
     players: [],
     hostPlayerId: '',
     localPlayerId: playerId,
@@ -40,29 +57,51 @@ export function createJoinerLobbyState(roomCode: string, playerId: string): Game
 
 export function electHost(players: Player[]): string | null {
   const connected = [...players]
-    .filter((player) => player.connected)
+    .filter((player) => player.connected && !player.isBot)
     .sort((a, b) => a.joinOrder - b.joinOrder);
 
   return connected[0]?.id ?? null;
 }
 
+export function nextJoinOrder(players: Player[]): number {
+  const used = new Set(players.map((player) => player.joinOrder));
+  for (let seat = 0; seat < MAX_PLAYERS; seat += 1) {
+    if (!used.has(seat)) return seat;
+  }
+  return players.length;
+}
+
+export function createBotPlayer(joinOrder: number, existingNames: string[]): Player {
+  const taken = new Set(existingNames.map((name) => name.toLowerCase()));
+  let index = 1;
+  let name = `Bot ${index}`;
+  while (taken.has(name.toLowerCase())) {
+    index += 1;
+    name = `Bot ${index}`;
+  }
+  return {
+    id: `bot-${crypto.randomUUID()}`,
+    name,
+    connected: true,
+    isBot: true,
+    joinOrder,
+    planSubmitted: false,
+    hp: STARTING_HP,
+    row: 0,
+    col: 0,
+  };
+}
+
 export function resetPlayersForGameStart(players: Player[]): Player[] {
-  return players.map((player) => ({
-    ...player,
-    ready: false,
-  }));
+  return resetArenaPlayers(players);
 }
 
 export function markDisconnected(player: Player): Player {
-  return { ...player, connected: false, ready: false };
+  return { ...player, connected: false };
 }
 
 export function startMatch(state: GameState): GameState {
-  return {
-    ...state,
-    phase: 'playing',
-    players: resetPlayersForGameStart(state.players),
-  };
+  return startArenaMatch(state);
 }
 
 export function applyPlayerAction(
@@ -71,27 +110,17 @@ export function applyPlayerAction(
   action: PlayerAction,
 ): GameState {
   switch (action.type) {
-    case 'toggleReady': {
-      if (state.phase !== 'playing') return state;
-      const actor = state.players.find((player) => player.id === playerId);
-      if (!actor?.connected) return state;
-      return {
-        ...state,
-        players: state.players.map((player) =>
-          player.id === playerId ? { ...player, ready: !player.ready } : player,
-        ),
-      };
-    }
     case 'endMatch': {
       if (state.phase !== 'playing' || playerId !== state.hostPlayerId) return state;
-      return { ...state, phase: 'finished' };
+      return { ...state, phase: 'finished', turnPhase: 'resolving' };
     }
     case 'returnToLobby': {
       if (state.phase !== 'finished' || playerId !== state.hostPlayerId) return state;
       return {
         ...state,
         phase: 'lobby',
-        players: resetPlayersForGameStart(state.players),
+        ...emptyArenaFields(),
+        players: resetArenaPlayers(state.players),
       };
     }
     default:

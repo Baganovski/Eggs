@@ -1,6 +1,6 @@
 ---
 name: bump-version
-description: Bump the Random Game version everywhere it is written, keeping the sources in sync. Use whenever asked to bump/increment/raise the version, cut a new version, or set a specific version. Default bump is +0.0.1 unless the user states otherwise.
+description: Bump the BEAT version everywhere it is written, keeping the sources in sync. Use whenever asked to bump/increment/raise the version, cut a new version, or set a specific version. Default bump is +0.0.1 unless the user states otherwise.
 disable-model-invocation: true
 ---
 

@@ -1,0 +1,46 @@
+name: Automerge
+
+# Private free repos can't use branch protection / native auto-merge waiting
+# on required checks. Squash-merge open PRs once the CI workflow succeeds.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    # Only act on CI runs for pull requests. CI on push to main is skipped here.
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Squash-merge open PR for this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHA="${{ github.event.workflow_run.head_sha }}"
+          PR_NUMBER="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${{ github.repository }}/commits/${SHA}/pulls" \
+            --jq 'map(select(.state == "open" and .draft == false)) | .[0].number // empty')"
+          if [ -z "${PR_NUMBER}" ]; then
+            echo "No open non-draft PR for ${SHA}; nothing to merge."
+            exit 0
+          fi
+          echo "Squash-merging PR #${PR_NUMBER}"
+          # Use the REST merge API — `gh pr merge` expects a local git checkout.
+          gh api -X PUT "repos/${{ github.repository }}/pulls/${PR_NUMBER}/merge" \
+            -f merge_method=squash
+          HEAD_REF="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${{ github.repository }}/pulls/${PR_NUMBER}" \
+            --jq '.head.ref')"
+          gh api -X DELETE \
+            "repos/${{ github.repository }}/git/refs/heads/${HEAD_REF}" \
+            || echo "Branch ${HEAD_REF} already deleted."

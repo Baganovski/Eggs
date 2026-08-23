@@ -11,9 +11,10 @@ disable-model-invocation: true
 Your job is to get this PR to a merge-ready state: mergeable, required CI green,
 and every active unresolved comment triaged — then finish the merge loop.
 
-If the repo has an automerge workflow, still merge (or enable auto-merge)
+If the repo has an automerge workflow (`.github/workflows/automerge.yml`), still merge (or enable auto-merge)
 yourself when ready so cloud babysit sessions do not wait on that Action, and so
-draft/manual cases are covered.
+draft/manual cases are covered. Open, non-draft PRs targeting `main`/`master`
+are squash-merged automatically when the `CI` workflow succeeds.
 
 ## Operating loop
 

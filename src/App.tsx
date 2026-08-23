@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useGameRoom } from './context/GameRoomContext';
 import { RoomShell } from './components/RoomShell';
+import { Toast } from './components/Toast';
 import { MAX_PLAYERS, MIN_PLAYERS } from './types/game';
 
 type Screen = 'home' | 'create' | 'join';
@@ -15,6 +16,8 @@ export function App() {
     joinRoom,
     startGame,
     sendPlayerAction,
+    addBot,
+    removeBot,
     leaveRoom,
     clearNotice,
     clearError,
@@ -26,13 +29,11 @@ export function App() {
 
   if (state) {
     const connectedPlayers = state.players.filter((player) => player.connected);
-    const localPlayer = state.players.find((player) => player.id === state.localPlayerId);
     const isHost = state.localPlayerId === state.hostPlayerId;
 
     return (
       <RoomShell
-        roomCode={state.roomCode}
-        phase={state.phase}
+        state={state}
         connectedCount={connectedPlayers.length}
         canStart={
           isHost &&
@@ -42,25 +43,10 @@ export function App() {
         }
         isHost={isHost}
         onStart={startGame}
+        onAddBot={addBot}
+        onRemoveBot={removeBot}
         onLeave={leaveRoom}
-        roster={state.players.map((player) => ({
-          id: player.id,
-          name: player.name,
-          connected: player.connected,
-          isHost: player.id === state.hostPlayerId,
-          isYou: player.id === state.localPlayerId,
-        }))}
-        battlePlayers={state.players.map((player) => ({
-          id: player.id,
-          name: player.name,
-          connected: player.connected,
-          ready: player.ready,
-          isHost: player.id === state.hostPlayerId,
-          isYou: player.id === state.localPlayerId,
-        }))}
-        localReady={localPlayer?.ready ?? false}
-        onToggleReady={() => sendPlayerAction({ type: 'toggleReady' })}
-        onEndMatch={() => sendPlayerAction({ type: 'endMatch' })}
+        onSubmitPlan={(actions) => sendPlayerAction({ type: 'submitPlan', actions })}
         onReturnToLobby={() => sendPlayerAction({ type: 'returnToLobby' })}
         notice={notice}
         error={error}
@@ -84,25 +70,30 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <div className="home-backdrop" aria-hidden="true" />
-
       <main className="home-main">
         <header className="home-hero">
-          <p className="brand">Random Game</p>
-          <h1>Four fighters. One room.</h1>
-          <p className="home-lede">
-            Create a match, share the code, and wait for the others. The arena comes later —
-            the lobby is ready now.
-          </p>
+          <svg className="home-doodle" viewBox="0 0 48 48" aria-hidden="true">
+            <path
+              d="M6 24 C14 10 34 10 42 24 C34 38 14 38 6 24 Z"
+              fill="#ffe14a"
+              stroke="#111"
+              strokeWidth="3"
+              strokeLinejoin="round"
+            />
+            <circle cx="24" cy="24" r="8" fill="#fff" stroke="#111" strokeWidth="2.4" />
+            <circle cx="24" cy="24" r="4" fill="#111" />
+          </svg>
+          <h1 className="brand">BEAT</h1>
+          <p className="home-lede">3 HP, 2 Moves, 1 Beat</p>
         </header>
 
         {screen === 'home' && (
           <section className="home-actions">
             <button type="button" className="btn btn-primary" onClick={() => setScreen('create')}>
-              Create game
+              Open a room
             </button>
             <button type="button" className="btn btn-secondary" onClick={() => setScreen('join')}>
-              Join game
+              Hop in
             </button>
           </section>
         )}
@@ -115,7 +106,7 @@ export function App() {
                 id="create-name"
                 value={playerName}
                 onChange={(event) => setPlayerName(event.target.value)}
-                placeholder="Callsign"
+                placeholder="Who’s playing?"
                 autoComplete="nickname"
                 maxLength={20}
                 required
@@ -125,7 +116,7 @@ export function App() {
                   Back
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={isConnecting}>
-                  {isConnecting ? 'Creating room…' : 'Create & join'}
+                  {isConnecting ? 'Opening room…' : 'Let’s go'}
                 </button>
               </div>
             </form>
@@ -135,7 +126,7 @@ export function App() {
         {screen === 'join' && (
           <section className="panel home-panel">
             <form className="home-form" onSubmit={handleJoin}>
-              <label htmlFor="join-code">Join code</label>
+              <label htmlFor="join-code">Room code</label>
               <input
                 id="join-code"
                 value={joinCode}
@@ -150,7 +141,7 @@ export function App() {
                 id="join-name"
                 value={playerName}
                 onChange={(event) => setPlayerName(event.target.value)}
-                placeholder="Callsign"
+                placeholder="Who’s playing?"
                 autoComplete="nickname"
                 maxLength={20}
                 required
@@ -160,7 +151,7 @@ export function App() {
                   Back
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={isConnecting}>
-                  {isConnecting ? 'Connecting…' : 'Enter room'}
+                  {isConnecting ? 'Linking up…' : 'Let’s go'}
                 </button>
               </div>
             </form>
@@ -168,9 +159,9 @@ export function App() {
         )}
 
         {error && (
-          <p className="home-error" role="alert">
-            {error}
-          </p>
+          <div className="toast-stack">
+            <Toast message={error} tone="error" onDismiss={clearError} />
+          </div>
         )}
       </main>
     </div>

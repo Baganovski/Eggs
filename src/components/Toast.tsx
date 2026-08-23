@@ -6,7 +6,7 @@ interface ToastProps {
 
 export function Toast({ message, tone, onDismiss }: ToastProps) {
   return (
-    <div className={`toast toast-${tone}`} role="status">
+    <div className={`toast toast-${tone}`} role={tone === 'error' ? 'alert' : 'status'}>
       <p>{message}</p>
       <button type="button" className="toast-dismiss" onClick={onDismiss}>
         Dismiss

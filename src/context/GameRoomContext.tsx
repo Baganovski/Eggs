@@ -21,6 +21,8 @@ interface GameRoomContextValue {
   joinRoom: (roomCode: string, playerName: string) => Promise<void>;
   startGame: () => void;
   sendPlayerAction: (action: PlayerAction) => void;
+  addBot: () => void;
+  removeBot: (playerId: string) => void;
   leaveRoom: () => void;
   clearNotice: () => void;
   clearError: () => void;
@@ -109,6 +111,14 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
     sessionRef.current?.sendPlayerAction(action);
   }, []);
 
+  const addBot = useCallback(() => {
+    sessionRef.current?.addBot();
+  }, []);
+
+  const removeBot = useCallback((playerId: string) => {
+    sessionRef.current?.removeBot(playerId);
+  }, []);
+
   const value = useMemo(
     () => ({
       state,
@@ -119,6 +129,8 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
       joinRoom,
       startGame,
       sendPlayerAction,
+      addBot,
+      removeBot,
       leaveRoom,
       clearNotice: () => setNotice(null),
       clearError: () => setError(null),
@@ -132,6 +144,8 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
       joinRoom,
       startGame,
       sendPlayerAction,
+      addBot,
+      removeBot,
       leaveRoom,
     ],
   );
