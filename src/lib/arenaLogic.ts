@@ -22,11 +22,38 @@ export const START_CORNERS: Cell[] = [
   { row: 0, col: BOARD_SIZE - 1 },
 ];
 
-export const MAP_OBJECTS: Cell[] = [
-  { row: 2, col: 2 },
-  { row: 2, col: 4 },
-  { row: 4, col: 3 },
-];
+export const OBSTACLE_COUNT = 3;
+
+function chebyshevDistance(a: Cell, b: Cell): number {
+  return Math.max(Math.abs(a.row - b.row), Math.abs(a.col - b.col));
+}
+
+function isWithinOneSquare(cell: Cell, other: Cell): boolean {
+  return chebyshevDistance(cell, other) <= 1;
+}
+
+export function generateMapObjects(playerPositions: Cell[]): Cell[] {
+  const candidates: Cell[] = [];
+  for (let row = 0; row < BOARD_SIZE; row += 1) {
+    for (let col = 0; col < BOARD_SIZE; col += 1) {
+      const cell = { row, col };
+      const tooClose = playerPositions.some((pos) => isWithinOneSquare(cell, pos));
+      if (!tooClose) candidates.push(cell);
+    }
+  }
+
+  let pool = [...candidates];
+  const objects: Cell[] = [];
+  const count = Math.min(OBSTACLE_COUNT, pool.length);
+  for (let i = 0; i < count; i += 1) {
+    if (pool.length === 0) break;
+    const index = Math.floor(Math.random() * pool.length);
+    const picked = pool[index];
+    objects.push(picked);
+    pool = pool.filter((cell) => !isWithinOneSquare(cell, picked));
+  }
+  return objects;
+}
 
 export const STAY_PLAN: [ArenaAction, ArenaAction] = [{ type: 'stay' }, { type: 'stay' }];
 
@@ -61,11 +88,11 @@ export function isOnBoard(cell: Cell): boolean {
   );
 }
 
-export function isObjectCell(cell: Cell): boolean {
-  return MAP_OBJECTS.some((object) => cellsEqual(object, cell));
+export function isObjectCell(cell: Cell, mapObjects: Cell[]): boolean {
+  return mapObjects.some((object) => cellsEqual(object, cell));
 }
 
-export function shotRayCells(from: Cell, dir: Direction): Cell[] {
+export function shotRayCells(from: Cell, dir: Direction, mapObjects: Cell[]): Cell[] {
   const { dr, dc } = DIR_DELTA[dir];
   const cells: Cell[] = [];
   let row = from.row + dr;
@@ -73,7 +100,7 @@ export function shotRayCells(from: Cell, dir: Direction): Cell[] {
   while (isOnBoard({ row, col })) {
     const cell = { row, col };
     cells.push(cell);
-    if (isObjectCell(cell)) break;
+    if (isObjectCell(cell, mapObjects)) break;
     row += dr;
     col += dc;
   }
@@ -126,11 +153,13 @@ function isCell(value: unknown): value is Cell {
   return Number.isInteger(cell.row) && Number.isInteger(cell.col) && isOnBoard(cell);
 }
 
-function isWalkLegal(from: Cell, path: Cell[]): boolean {
+function isWalkLegal(from: Cell, path: Cell[], mapObjects: Cell[]): boolean {
   if (path.length < 1 || path.length > MAX_WALK_STEPS) return false;
   let current = from;
   for (const step of path) {
-    if (!isOnBoard(step) || isObjectCell(step) || !isAdjacent8(current, step)) return false;
+    if (!isOnBoard(step) || isObjectCell(step, mapObjects) || !isAdjacent8(current, step)) {
+      return false;
+    }
     current = step;
   }
   return true;
@@ -152,6 +181,7 @@ function parseAction(value: unknown): ArenaAction | null {
 export function parseAndValidatePlan(
   player: Player,
   actions: unknown,
+  mapObjects: Cell[],
 ): [ArenaAction, ArenaAction] | null {
   if (!isAlive(player) || !Array.isArray(actions) || actions.length !== 2) return null;
   const first = parseAction(actions[0]);
@@ -161,7 +191,7 @@ export function parseAndValidatePlan(
   let position = { row: player.row, col: player.col };
   for (const action of [first, second]) {
     if (action.type === 'walk') {
-      if (!isWalkLegal(position, action.path)) return null;
+      if (!isWalkLegal(position, action.path, mapObjects)) return null;
       position = action.path[action.path.length - 1];
     }
   }
@@ -170,7 +200,7 @@ export function parseAndValidatePlan(
 
 export function emptyArenaFields(): Pick<
   GameState,
-  'turnPhase' | 'round' | 'outcome' | 'timeline' | 'roundStart' | 'lastReplay'
+  'turnPhase' | 'round' | 'outcome' | 'timeline' | 'roundStart' | 'lastReplay' | 'mapObjects'
 > {
   return {
     turnPhase: 'planning',
@@ -179,10 +209,23 @@ export function emptyArenaFields(): Pick<
     timeline: [],
     roundStart: null,
     lastReplay: null,
+    mapObjects: [],
   };
 }
 
 export function startArenaMatch(state: GameState): GameState {
+  const players = state.players.map((player) => {
+    const corner = START_CORNERS[player.joinOrder] ?? START_CORNERS[0];
+    return {
+      ...player,
+      hp: STARTING_HP,
+      row: corner.row,
+      col: corner.col,
+      planSubmitted: false,
+    };
+  });
+  const mapObjects = generateMapObjects(players.map((player) => ({ row: player.row, col: player.col })));
+
   return {
     ...state,
     phase: 'playing',
@@ -192,16 +235,8 @@ export function startArenaMatch(state: GameState): GameState {
     timeline: [],
     roundStart: null,
     lastReplay: null,
-    players: state.players.map((player) => {
-      const corner = START_CORNERS[player.joinOrder] ?? START_CORNERS[0];
-      return {
-        ...player,
-        hp: STARTING_HP,
-        row: corner.row,
-        col: corner.col,
-        planSubmitted: false,
-      };
-    }),
+    mapObjects,
+    players,
   };
 }
 
@@ -280,6 +315,7 @@ function fireShot(
   from: Cell,
   dir: Direction,
   shooterId: string,
+  mapObjects: Cell[],
 ): { end: Cell; hit?: Player } {
   const { dr, dc } = DIR_DELTA[dir];
   let row = from.row + dr;
@@ -287,7 +323,7 @@ function fireShot(
   let end = from;
   while (isOnBoard({ row, col })) {
     end = { row, col };
-    if (isObjectCell(end)) return { end };
+    if (isObjectCell(end, mapObjects)) return { end };
     const hit = occupantAt(players, end, shooterId);
     if (hit) return { end, hit };
     row += dr;
@@ -306,13 +342,14 @@ function resolveMovement(
   players: Player[],
   intents: Intent[],
   timeline: PlaybackEvent[],
+  mapObjects: Cell[],
 ): Player[] {
   const byId = new Map(intents.map((intent) => [intent.id, intent]));
   const failed = new Set<string>();
 
   const destGroups = new Map<string, Intent[]>();
   for (const intent of intents) {
-    if (!cellsEqual(intent.from, intent.to) && isObjectCell(intent.to)) {
+    if (!cellsEqual(intent.from, intent.to) && isObjectCell(intent.to, mapObjects)) {
       failed.add(intent.id);
     }
     const key = `${intent.to.row},${intent.to.col}`;
@@ -395,6 +432,7 @@ function outcomeFrom(players: Player[]): MatchOutcome {
 export function resolveRound(
   players: Player[],
   plans: Map<string, [ArenaAction, ArenaAction]>,
+  mapObjects: Cell[],
 ): ResolveResult {
   let nextPlayers = players.map((player) => ({ ...player }));
   const timeline: PlaybackEvent[] = [];
@@ -421,14 +459,14 @@ export function resolveRound(
         const from = { row: player.row, col: player.col };
         if (action?.type === 'walk' && action.path[beat] && isOnBoard(action.path[beat])) {
           const step = action.path[beat];
-          const blocked = isObjectCell(step);
+          const blocked = isObjectCell(step, mapObjects);
           const to = !blocked && isAdjacent8(from, step) ? step : from;
           return { id: player.id, from, to };
         }
         return { id: player.id, from, to: from };
       });
 
-      nextPlayers = resolveMovement(nextPlayers, intents, timeline);
+      nextPlayers = resolveMovement(nextPlayers, intents, timeline, mapObjects);
 
       if (beat !== 0) continue;
 
@@ -438,7 +476,7 @@ export function resolveRound(
       for (const player of living(snapshot)) {
         const action = plans.get(player.id)?.[actionIndex];
         if (action?.type !== 'shoot') continue;
-        const { end, hit } = fireShot(snapshot, player, action.dir, player.id);
+        const { end, hit } = fireShot(snapshot, player, action.dir, player.id, mapObjects);
         timeline.push({
           type: 'shot',
           shooterId: player.id,

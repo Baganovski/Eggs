@@ -184,7 +184,7 @@ export class RoomSession {
   private submitBotPlan(playerId: string): void {
     const player = this.state.players.find((entry) => entry.id === playerId);
     if (!player?.isBot) return;
-    const plan = chooseBotPlan(player, this.state.players);
+    const plan = chooseBotPlan(player, this.state.players, this.state.mapObjects);
     this.handlePlayerAction(playerId, { type: 'submitPlan', actions: plan });
   }
 
@@ -228,7 +228,7 @@ export class RoomSession {
       return;
     }
 
-    const result = resolveRound(this.state.players, this.pendingPlans);
+    const result = resolveRound(this.state.players, this.pendingPlans, this.state.mapObjects);
     this.pendingPlans.clear();
     this.state = applyResolvedRound(this.state, result);
     this.syncState();
@@ -253,7 +253,7 @@ export class RoomSession {
     if (!player?.connected || !isAlive(player)) return;
     if (player.planSubmitted || this.pendingPlans.has(playerId)) return;
 
-    const plan = parseAndValidatePlan(player, action.actions);
+    const plan = parseAndValidatePlan(player, action.actions, this.state.mapObjects);
     if (!plan) {
       this.rejectPlan(playerId, 'That plan is not legal.');
       return;

@@ -88,6 +88,7 @@ export interface GameState {
   timeline: PlaybackEvent[];
   roundStart: RoundStartToken[] | null;
   lastReplay: LastReplay | null;
+  mapObjects: Cell[];
   players: Player[];
   hostPlayerId: string;
   localPlayerId: string;

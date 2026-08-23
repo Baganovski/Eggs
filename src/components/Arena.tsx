@@ -282,7 +282,9 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
   const walkPath = draft[slot]?.type === 'walk' ? draft[slot].path : [];
   const walkTip = walkPath[walkPath.length - 1] ?? origin;
   const validWalk =
-    canPlan && mode === 'walk' ? neighbors8(walkTip).filter((cell) => !isObjectCell(cell)) : [];
+    canPlan && mode === 'walk'
+      ? neighbors8(walkTip).filter((cell) => !isObjectCell(cell, state.mapObjects))
+      : [];
 
   const walkTones = useMemo(() => {
     const tones = new Map<string, OverlayTone>();
@@ -309,15 +311,15 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
       const from = index === 0 ? start : plannedPositionAfter(start, draft[0]);
       const editingThisShot = slot === index && mode === 'shoot';
       const tone: OverlayTone = editingThisShot ? 'active' : 'muted';
-      for (const cell of shotRayCells(from, action.dir)) {
+      for (const cell of shotRayCells(from, action.dir, state.mapObjects)) {
         const key = `${cell.row},${cell.col}`;
         if (tone === 'active' || tones.get(key) !== 'active') tones.set(key, tone);
       }
     });
     return tones;
-  }, [draft, slot, local, mode]);
+  }, [draft, slot, local, mode, state.mapObjects]);
 
-  const legalPlan = local ? parseAndValidatePlan(local, draft) : null;
+  const legalPlan = local ? parseAndValidatePlan(local, draft, state.mapObjects) : null;
   const livingCount = state.players.filter(isAlive).length;
   const submittedCount =
     state.players.filter((player) => isAlive(player) && player.planSubmitted).length +
@@ -330,7 +332,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
       if (index === 0 && current[1]?.type === 'walk' && local) {
         const start = { row: local.row, col: local.col };
         const after = plannedPositionAfter(start, action);
-        if (!parseAndValidatePlan(local, [action, current[1]])) {
+        if (!parseAndValidatePlan(local, [action, current[1]], state.mapObjects)) {
           next[1] = null;
         } else if (current[1].path[0] && !isAdjacent8(after, current[1].path[0])) {
           next[1] = null;
@@ -363,7 +365,9 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     if (!canPlan) return;
     if (mode === 'walk') {
       if (walkPath.length >= MAX_WALK_STEPS) return;
-      if (!isAdjacent8(walkTip, cell) || !isOnBoard(cell) || isObjectCell(cell)) return;
+      if (!isAdjacent8(walkTip, cell) || !isOnBoard(cell) || isObjectCell(cell, state.mapObjects)) {
+        return;
+      }
       setAction(slot, { type: 'walk', path: [...walkPath, cell] });
       return;
     }
@@ -373,14 +377,8 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     }
   };
 
-  const undoStep = () => {
+  const resetAction = () => {
     if (!canPlan) return;
-    const action = draft[slot];
-    if (action?.type === 'walk' && action.path.length > 0) {
-      const path = action.path.slice(0, -1);
-      setAction(slot, path.length ? { type: 'walk', path } : null);
-      return;
-    }
     setAction(slot, null);
   };
 
@@ -434,11 +432,21 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     (planning || (state.phase === 'finished' && replayDone)) &&
     !watchingLast;
 
-  const replayButton = canReplayLast ? (
-    <button type="button" className="btn btn-ghost" onClick={watchLastTurn}>
-      Replay
-    </button>
-  ) : null;
+  const plannerHint = !localAlive
+    ? 'You’re out. Watch the rest of the grid.'
+    : local?.planSubmitted || localLocked
+      ? 'Locked. Waiting on the rest.'
+      : watchingLast
+        ? status || 'Watching the last round…'
+        : !planning
+          ? status || 'Watching the grid…'
+          : mode === 'stay'
+            ? 'Stay put this beat. They might walk into you.'
+            : mode === 'walk'
+              ? 'Tap any of the 8 neighbors. Up to 3 steps. Walls block movement and shots.'
+              : 'Tap a cell on the line you want. The ray lights up on the grid.';
+
+  const showPlanner = state.phase === 'playing';
 
   return (
     <div className="arena">
@@ -517,7 +525,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             })();
             const isValid = validWalk.some((step) => cellsEqual(step, cell));
             const isOrigin = canPlan && cellsEqual(origin, cell);
-            const hasCrate = isObjectCell(cell);
+            const hasBlock = isObjectCell(cell, state.mapObjects);
             const occupants = tokens
               .filter((token) => token.row === row && token.col === col)
               .sort((a, b) => a.hp - b.hp);
@@ -537,7 +545,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                 }${aimTone === 'active' ? ' on-aim' : ''}${
                   isValid ? ' is-valid' : ''
                 }${isOrigin ? ' is-origin' : ''}${beam ? ' on-beam' : ''}${
-                  hasCrate ? ' has-crate' : ''
+                  hasBlock ? ' has-block' : ''
                 }`}
                 style={
                   beamShooter
@@ -548,7 +556,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                 disabled={!canPlan}
               >
                 {pathIndex >= 0 && <span className="path-index">{pathIndex + 1}</span>}
-                {hasCrate && <CrateMark />}
+                {hasBlock && <BlockMark />}
                 {occupants.map((token) => (
                   <PlayerToken
                     key={token.id}
@@ -566,7 +574,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         </div>
       </div>
 
-      {planning && localAlive && !local?.planSubmitted && !localLocked && (
+      {showPlanner && (
         <div className="arena-planner">
           <div className="action-slots">
             {([0, 1] as const).map((index) => (
@@ -574,6 +582,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                 key={index}
                 type="button"
                 className={`action-slot${slot === index ? ' is-active' : ''}`}
+                disabled={!canPlan}
                 onClick={() => {
                   setSlot(index);
                   const action = draft[index];
@@ -590,6 +599,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             <button
               type="button"
               className={`btn btn-secondary${mode === 'stay' ? ' is-selected' : ''}`}
+              disabled={!canPlan}
               onClick={() => chooseMode('stay')}
             >
               Sit
@@ -597,6 +607,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             <button
               type="button"
               className={`btn btn-secondary${mode === 'walk' ? ' is-selected' : ''}`}
+              disabled={!canPlan}
               onClick={() => chooseMode('walk')}
             >
               Walk
@@ -604,47 +615,43 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             <button
               type="button"
               className={`btn btn-secondary${mode === 'shoot' ? ' is-selected' : ''}`}
+              disabled={!canPlan}
               onClick={() => chooseMode('shoot')}
             >
               Shoot
             </button>
           </div>
 
-          {mode === 'stay' && (
-            <p className="arena-hint">Stay put this beat. They might walk into you.</p>
-          )}
-          {mode === 'walk' && (
-            <p className="arena-hint">Tap any of the 8 neighbors. Up to 3 steps. Crates block the path.</p>
-          )}
-          {mode === 'shoot' && (
-            <p className="arena-hint">Tap a cell on the line you want. The ray lights up on the grid.</p>
-          )}
+          <p className="arena-hint">{plannerHint}</p>
 
           <div className="planner-actions">
             <div className="planner-tools">
-              <button type="button" className="btn btn-ghost" onClick={undoStep}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={!canPlan}
+                onClick={resetAction}
+              >
                 Reset
               </button>
-              {replayButton}
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={!canReplayLast}
+                onClick={watchLastTurn}
+              >
+                Replay
+              </button>
             </div>
-            <button type="button" className="btn btn-primary" disabled={!legalPlan} onClick={lockIn}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!canPlan || !legalPlan}
+              onClick={lockIn}
+            >
               Lock it in
             </button>
           </div>
-        </div>
-      )}
-
-      {planning && localAlive && (local?.planSubmitted || localLocked) && (
-        <div className="replay-row">
-          <p className="arena-copy">Locked. Waiting on the rest.</p>
-          {replayButton}
-        </div>
-      )}
-
-      {planning && !localAlive && (
-        <div className="replay-row">
-          <p className="arena-copy">You’re out. Watch the rest of the grid.</p>
-          {replayButton}
         </div>
       )}
 
@@ -665,7 +672,14 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
 
       {state.phase === 'finished' && isHost && replayDone && !watchingLast && (
         <div className="replay-row">
-          {replayButton}
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={!canReplayLast}
+            onClick={watchLastTurn}
+          >
+            Replay
+          </button>
           <button type="button" className="btn btn-primary" onClick={onReturnToLobby}>
             Back to the room
           </button>
@@ -674,7 +688,14 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
 
       {state.phase === 'finished' && !isHost && replayDone && !watchingLast && (
         <div className="replay-row">
-          {replayButton}
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={!canReplayLast}
+            onClick={watchLastTurn}
+          >
+            Replay
+          </button>
           <p className="arena-copy">Host is sending everyone back to the room.</p>
         </div>
       )}
@@ -682,12 +703,20 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
   );
 }
 
-function CrateMark() {
+function BlockMark() {
   return (
-    <span className="arena-crate" aria-hidden="true">
+    <span className="arena-block" aria-hidden="true">
       <svg viewBox="0 0 32 32">
-        <rect x="6" y="8" width="20" height="16" rx="2" fill="#ff8a3d" stroke="#111" strokeWidth="2.4" />
-        <path d="M6 16 H26 M16 8 V24" fill="none" stroke="#111" strokeWidth="2.2" />
+        <rect x="2" y="2" width="28" height="28" rx="3" fill="#7a756f" stroke="#111" strokeWidth="2.4" />
+        <path
+          d="M2 11 H30 M2 20 H30 M11 2 V11 M22 11 V20 M11 20 V30 M22 2 V11"
+          fill="none"
+          stroke="#111"
+          strokeWidth="1.6"
+        />
+        <rect x="4" y="4" width="6" height="6" rx="1" fill="#959089" />
+        <rect x="13" y="13" width="6" height="6" rx="1" fill="#959089" />
+        <rect x="22" y="22" width="6" height="6" rx="1" fill="#959089" />
       </svg>
     </span>
   );
