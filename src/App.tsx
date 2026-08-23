@@ -83,7 +83,7 @@ export function App() {
             <circle cx="24" cy="24" r="8" fill="#fff" stroke="#111" strokeWidth="2.4" />
             <circle cx="24" cy="24" r="4" fill="#111" />
           </svg>
-          <h1 className="brand">FORESEE</h1>
+          <h1 className="brand">BEAT</h1>
           <p className="home-lede">3 HP, 2 Moves, 1 Beat</p>
         </header>
 
