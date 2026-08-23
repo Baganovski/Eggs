@@ -1,5 +1,6 @@
 import Peer, { type DataConnection } from 'peerjs';
 import type {
+  ArenaAction,
   GameState,
   Player,
   PlayerAction,
@@ -9,12 +10,25 @@ import type {
 } from '../types/game';
 import { MAX_PLAYERS, MIN_PLAYERS } from '../types/game';
 import {
+  applyResolvedRound,
+  beginPlanningRound,
+  isAlive,
+  parseAndValidatePlan,
+  playbackDurationMs,
+  resetPlanningAfterHandoff,
+  resolveRound,
+  STAY_PLAN,
+} from './arenaLogic';
+import { chooseBotPlan } from './botLogic';
+import {
   applyPlayerAction,
+  createBotPlayer,
   createHostLobbyState,
   createInitialPlayer,
   createJoinerLobbyState,
   electHost,
   markDisconnected,
+  nextJoinOrder,
   startMatch,
 } from './gameLogic';
 
@@ -36,6 +50,10 @@ export class RoomSession {
   private hostConnection: DataConnection | null = null;
   private destroyed = false;
   private migrationInProgress = false;
+  private pendingPlans = new Map<string, [ArenaAction, ArenaAction]>();
+  private playbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private botPlanGeneration = 0;
+  private botTimers: ReturnType<typeof setTimeout>[] = [];
 
   private constructor(state: GameState, callbacks: RoomCallbacks) {
     this.state = state;
@@ -82,18 +100,47 @@ export class RoomSession {
   }
 
   sendPlayerAction(action: PlayerAction): void {
+    if (this.isHost) {
+      this.handlePlayerAction(this.state.localPlayerId, action);
+      return;
+    }
     this.send({
       type: 'playerAction',
       playerId: this.state.localPlayerId,
       action,
     });
-    if (this.isHost) {
-      this.handlePlayerAction(this.state.localPlayerId, action);
+  }
+
+  addBot(): void {
+    if (!this.isHost) return;
+    if (this.state.phase !== 'lobby') return;
+    const activeCount = this.state.players.filter((player) => player.connected).length;
+    if (activeCount >= MAX_PLAYERS) {
+      this.emitError('This room is full.');
+      return;
     }
+    const bot = createBotPlayer(
+      nextJoinOrder(this.state.players),
+      this.state.players.map((player) => player.name),
+    );
+    this.state.players = [...this.state.players, bot];
+    this.broadcastLobby();
+  }
+
+  removeBot(playerId: string): void {
+    if (!this.isHost) return;
+    if (this.state.phase !== 'lobby') return;
+    const bot = this.state.players.find((player) => player.id === playerId);
+    if (!bot?.isBot) return;
+    this.state.players = this.state.players.filter((player) => player.id !== playerId);
+    this.broadcastLobby();
   }
 
   destroy(): void {
     this.destroyed = true;
+    this.clearPlaybackTimer();
+    this.clearBotTimers();
+    this.pendingPlans.clear();
     for (const connection of this.connections.values()) {
       connection.close();
     }
@@ -101,6 +148,126 @@ export class RoomSession {
     this.hostConnection = null;
     this.peer?.destroy();
     this.peer = null;
+  }
+
+  private clearPlaybackTimer(): void {
+    if (this.playbackTimer !== null) {
+      clearTimeout(this.playbackTimer);
+      this.playbackTimer = null;
+    }
+  }
+
+  private clearBotTimers(): void {
+    this.botPlanGeneration += 1;
+    for (const timer of this.botTimers) {
+      clearTimeout(timer);
+    }
+    this.botTimers = [];
+  }
+
+  private scheduleBotPlans(): void {
+    if (!this.isHost) return;
+    if (this.state.phase !== 'playing' || this.state.turnPhase !== 'planning') return;
+    this.clearBotTimers();
+    const generation = this.botPlanGeneration;
+    for (const player of this.state.players) {
+      if (!player.isBot || !player.connected || !isAlive(player) || player.planSubmitted) continue;
+      const delay = 450 + Math.floor(Math.random() * 700);
+      const timer = setTimeout(() => {
+        if (this.destroyed || !this.isHost || generation !== this.botPlanGeneration) return;
+        this.submitBotPlan(player.id);
+      }, delay);
+      this.botTimers.push(timer);
+    }
+  }
+
+  private submitBotPlan(playerId: string): void {
+    const player = this.state.players.find((entry) => entry.id === playerId);
+    if (!player?.isBot) return;
+    const plan = chooseBotPlan(player, this.state.players);
+    this.handlePlayerAction(playerId, { type: 'submitPlan', actions: plan });
+  }
+
+  private rejectPlan(playerId: string, message: string): void {
+    const connection = this.connections.get(playerId);
+    if (connection) {
+      this.send({ type: 'error', message }, connection);
+      return;
+    }
+    if (playerId === this.state.localPlayerId) {
+      this.emitError(message);
+    }
+  }
+
+  private syncState(): void {
+    this.broadcast({ type: 'stateSync', state: toPublicState(this.state) });
+    this.emitState();
+  }
+
+  private tryResolveIfReady(): void {
+    if (!this.isHost) return;
+    if (this.state.phase !== 'playing' || this.state.turnPhase !== 'planning') return;
+
+    const livingPlayers = this.state.players.filter(isAlive);
+    if (livingPlayers.length === 0) {
+      this.state = {
+        ...this.state,
+        phase: 'finished',
+        outcome: { kind: 'draw' },
+      };
+      this.syncState();
+      return;
+    }
+
+    for (const player of livingPlayers) {
+      if (this.pendingPlans.has(player.id)) continue;
+      if (!player.connected) {
+        this.pendingPlans.set(player.id, STAY_PLAN);
+        continue;
+      }
+      return;
+    }
+
+    const result = resolveRound(this.state.players, this.pendingPlans);
+    this.pendingPlans.clear();
+    this.state = applyResolvedRound(this.state, result);
+    this.syncState();
+
+    if (result.outcome.kind !== 'none') return;
+
+    this.clearPlaybackTimer();
+    const delay = playbackDurationMs(result.timeline);
+    this.playbackTimer = setTimeout(() => {
+      this.playbackTimer = null;
+      if (this.destroyed || !this.isHost) return;
+      if (this.state.phase !== 'playing' || this.state.turnPhase !== 'resolving') return;
+      this.state = beginPlanningRound(this.state);
+      this.syncState();
+      this.scheduleBotPlans();
+    }, delay);
+  }
+
+  private handleSubmitPlan(playerId: string, action: Extract<PlayerAction, { type: 'submitPlan' }>): void {
+    if (this.state.phase !== 'playing' || this.state.turnPhase !== 'planning') return;
+    const player = this.state.players.find((entry) => entry.id === playerId);
+    if (!player?.connected || !isAlive(player)) return;
+    if (player.planSubmitted || this.pendingPlans.has(playerId)) return;
+
+    const plan = parseAndValidatePlan(player, action.actions);
+    if (!plan) {
+      this.rejectPlan(playerId, 'That plan is not legal.');
+      return;
+    }
+
+    this.pendingPlans.set(playerId, plan);
+    this.state = {
+      ...this.state,
+      players: this.state.players.map((entry) =>
+        entry.id === playerId ? { ...entry, planSubmitted: true } : entry,
+      ),
+    };
+    this.syncState();
+    this.tryResolveIfReady();
   }
 
   private emitState(): void {
@@ -293,7 +460,9 @@ export class RoomSession {
         break;
       case 'playerLeft':
         this.updateState({ players: message.players });
-        this.emitNotice('A player left the game.');
+        if (this.state.phase !== 'lobby') {
+          this.emitNotice('A player left the match.');
+        }
         break;
       case 'hostHandoff':
         this.handleHostHandoff(message);
@@ -333,7 +502,6 @@ export class RoomSession {
       nextPlayer = {
         ...disconnectedSeat,
         connected: true,
-        ready: false,
       };
       this.state.players = this.state.players.map((player) =>
         player.id === disconnectedSeat.id ? nextPlayer : player,
@@ -349,7 +517,7 @@ export class RoomSession {
         connection.close();
         return;
       }
-      nextPlayer = createInitialPlayer(playerId, name, this.state.players.length);
+      nextPlayer = createInitialPlayer(playerId, name, nextJoinOrder(this.state.players));
       this.state.players = [...this.state.players, nextPlayer];
     }
     this.connections.set(nextPlayer.id, connection);
@@ -392,25 +560,28 @@ export class RoomSession {
       return;
     }
     if (this.state.phase !== 'lobby') return;
+    this.pendingPlans.clear();
+    this.clearPlaybackTimer();
+    this.clearBotTimers();
     this.state = startMatch(this.state);
     this.broadcast({ type: 'start', startedBy });
-    this.broadcast({ type: 'stateSync', state: toPublicState(this.state) });
-    this.emitState();
-    this.emitNotice('Match started. Arena coming soon.');
+    this.syncState();
+    this.scheduleBotPlans();
   }
 
   private handlePlayerAction(playerId: string, action: PlayerAction): void {
     if (!this.isHost) return;
+    if (action.type === 'submitPlan') {
+      this.handleSubmitPlan(playerId, action);
+      return;
+    }
     const next = applyPlayerAction(this.state, playerId, action);
     if (next === this.state) return;
+    this.clearPlaybackTimer();
+    this.clearBotTimers();
+    this.pendingPlans.clear();
     this.state = next;
-    this.broadcast({ type: 'stateSync', state: toPublicState(this.state) });
-    this.emitState();
-    if (action.type === 'endMatch') {
-      this.emitNotice('Host ended the match.');
-    } else if (action.type === 'returnToLobby') {
-      this.emitNotice('Back in the lobby.');
-    }
+    this.syncState();
   }
 
   private handleConnectionClosed(connection: DataConnection, playerId: string): void {
@@ -442,8 +613,11 @@ export class RoomSession {
       playerId,
       players: [...this.state.players],
     });
-    this.emitNotice(`${player.name} left.`);
+    if (this.state.phase !== 'lobby') {
+      this.emitNotice(`${player.name} left the match.`);
+    }
     this.emitState();
+    this.tryResolveIfReady();
     if (playerId === this.state.hostPlayerId) {
       void this.beginHostMigration();
     }
@@ -459,7 +633,7 @@ export class RoomSession {
       player.id === departedHostId ? markDisconnected(player) : player,
     );
 
-    const remaining = this.state.players.filter((player) => player.connected);
+    const remaining = this.state.players.filter((player) => player.connected && !player.isBot);
     if (remaining.length === 0) {
       this.emitError('Everyone left the room.');
       this.destroy();
@@ -494,6 +668,10 @@ export class RoomSession {
 
   private async promoteToHost(): Promise<void> {
     this.emitNotice('You are now hosting.');
+    this.clearPlaybackTimer();
+    this.clearBotTimers();
+    this.pendingPlans.clear();
+    this.state = resetPlanningAfterHandoff(this.state);
     for (const connection of this.connections.values()) {
       connection.close();
     }
@@ -510,6 +688,7 @@ export class RoomSession {
       state: toPublicState(this.state),
     });
     this.emitState();
+    this.scheduleBotPlans();
   }
 
   private mapConnectionToPlayer(connection: DataConnection, playerId: string): void {

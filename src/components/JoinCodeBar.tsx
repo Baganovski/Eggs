@@ -13,16 +13,18 @@ export function JoinCodeBar({ code, onLeave }: JoinCodeBarProps) {
   };
 
   return (
-    <header className="join-code-bar">
-      <div className="join-code-copy">
-        <span className="join-code-label">Join code</span>
-        <button type="button" className="join-code-value" onClick={copyCode}>
-          {code}
+    <header className="join-code-wrap">
+      <div className="join-code-bar">
+        <div className="join-code-copy">
+          <span className="join-code-label">Room code</span>
+          <button type="button" className="join-code-value" onClick={copyCode}>
+            {code}
+          </button>
+        </div>
+        <button type="button" className="btn btn-ghost" onClick={onLeave}>
+          Leave
         </button>
       </div>
-      <button type="button" className="btn btn-ghost" onClick={onLeave}>
-        Leave
-      </button>
     </header>
   );
 }
