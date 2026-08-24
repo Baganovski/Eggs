@@ -1,6 +1,6 @@
 ---
 name: bump-version
-description: Bump the BEAT version everywhere it is written, keeping the sources in sync. Use whenever asked to bump/increment/raise the version, cut a new version, or set a specific version. Default bump is +0.0.1 unless the user states otherwise.
+description: Bump the Egg version everywhere it is written, keeping the sources in sync. Use whenever asked to bump/increment/raise the version, cut a new version, or set a specific version. Default bump is +0.0.1 unless the user states otherwise.
 disable-model-invocation: true
 ---
 
@@ -32,7 +32,7 @@ use exactly that.
 ## Steps
 
 Work from the project root
-(`c:\Users\joeal\Documents\Development\Apps\RandomGame`).
+(`c:\Users\joeal\Documents\Development\Apps\Eggs`).
 
 1. **Read the current version** from `package.json` (`"version"` field).
 2. **Compute the target** — apply the default bump, or the user's explicit value.

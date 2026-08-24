@@ -40,9 +40,9 @@ function PanelHeader({
 }
 
 const lobbyHeader = {
-  eyebrow: 'Waiting',
-  title: 'The table’s filling',
-  copy: `Share the code, or add a bot. Host starts with ${MIN_PLAYERS}–${MAX_PLAYERS}.`,
+  eyebrow: 'Incubating',
+  title: 'The carton is filling',
+  copy: `Share the nest code, or add a bot. The hen starts with ${MIN_PLAYERS}–${MAX_PLAYERS} eggs.`,
 };
 
 export function RoomShell({
@@ -80,6 +80,7 @@ export function RoomShell({
                 isBot: player.isBot,
                 isHost: player.id === state.hostPlayerId,
                 isYou: player.id === state.localPlayerId,
+                joinOrder: player.joinOrder,
               }))}
               connectedCount={connectedCount}
               canManageBots={isHost && phase === 'lobby'}
@@ -100,12 +101,12 @@ export function RoomShell({
                   onClick={onStart}
                 >
                   {canStart
-                    ? 'Let’s play'
-                    : `Need ${MIN_PLAYERS}+ (${connectedCount}/${MAX_PLAYERS})`}
+                    ? 'Crack on'
+                    : `Need ${MIN_PLAYERS}+ eggs (${connectedCount}/${MAX_PLAYERS})`}
                 </button>
               </>
             ) : (
-              <p className="waiting-host">Waiting on the host.</p>
+              <p className="waiting-host">Waiting on the hen.</p>
             )}
           </section>
         ) : (

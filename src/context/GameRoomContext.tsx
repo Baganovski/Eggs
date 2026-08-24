@@ -63,7 +63,7 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
         });
         sessionRef.current = session;
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to create room.';
+        const message = err instanceof Error ? err.message : 'Couldn’t lay this nest.';
         setError(message);
       } finally {
         setIsConnecting(false);
@@ -94,7 +94,7 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
         );
         sessionRef.current = session;
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to join room.';
+        const message = err instanceof Error ? err.message : 'Couldn’t roll into that nest.';
         setError(message);
       } finally {
         setIsConnecting(false);

@@ -146,6 +146,7 @@ const PLAYBACK_MS: Record<PlaybackEvent['type'], number> = {
   hit: 220,
   death: 280,
   move: 380,
+  eggStain: 0,
   blocked: 400,
 };
 
@@ -305,7 +306,14 @@ export function parseAndValidatePlan(
 
 export function emptyArenaFields(): Pick<
   GameState,
-  'turnPhase' | 'round' | 'outcome' | 'timeline' | 'roundStart' | 'lastReplay' | 'mapObjects'
+  | 'turnPhase'
+  | 'round'
+  | 'outcome'
+  | 'timeline'
+  | 'roundStart'
+  | 'lastReplay'
+  | 'mapObjects'
+  | 'eggStains'
 > {
   return {
     turnPhase: 'planning',
@@ -315,6 +323,7 @@ export function emptyArenaFields(): Pick<
     roundStart: null,
     lastReplay: null,
     mapObjects: [],
+    eggStains: [],
   };
 }
 
@@ -342,6 +351,7 @@ export function startArenaMatch(state: GameState): GameState {
     roundStart: null,
     lastReplay: null,
     mapObjects,
+    eggStains: [],
     players,
   };
 }
@@ -395,6 +405,7 @@ export interface ResolveResult {
   players: Player[];
   timeline: PlaybackEvent[];
   outcome: MatchOutcome;
+  eggStains: Cell[];
 }
 
 function living(players: Player[]): Player[] {
@@ -405,6 +416,10 @@ function occupantAt(players: Player[], cell: Cell, exceptId?: string): Player | 
   return living(players).find(
     (player) => player.id !== exceptId && cellsEqual(player, cell),
   );
+}
+
+function hasFriedEggAt(players: Player[], cell: Cell): boolean {
+  return players.some((player) => player.hp <= 0 && cellsEqual(player, cell));
 }
 
 function isDiagonalMove(from: Cell, to: Cell): boolean {
@@ -460,6 +475,7 @@ function resolveMovement(
   intents: Intent[],
   timeline: PlaybackEvent[],
   mapObjects: Cell[],
+  eggStains: Cell[],
 ): Player[] {
   const byId = new Map(intents.map((intent) => [intent.id, intent]));
   const failed = new Set<string>();
@@ -535,6 +551,11 @@ function resolveMovement(
       from: intent.from,
       to: intent.to,
     });
+    if (hasFriedEggAt(players, intent.from)) {
+      const stain = { row: intent.to.row, col: intent.to.col };
+      eggStains.push(stain);
+      timeline.push({ type: 'eggStain', cell: stain });
+    }
     return { ...player, row: intent.to.row, col: intent.to.col };
   });
 }
@@ -550,9 +571,11 @@ export function resolveRound(
   players: Player[],
   plans: Map<string, [ArenaAction, ArenaAction]>,
   mapObjects: Cell[],
+  eggStains: Cell[] = [],
 ): ResolveResult {
   let nextPlayers = players.map((player) => ({ ...player }));
   const timeline: PlaybackEvent[] = [];
+  const nextStains = eggStains.map((cell) => ({ ...cell }));
 
   for (const actionIndex of [0, 1] as const) {
     const actors = living(nextPlayers);
@@ -588,7 +611,7 @@ export function resolveRound(
         return { id: player.id, from, to: step };
       });
 
-      nextPlayers = resolveMovement(nextPlayers, intents, timeline, mapObjects);
+      nextPlayers = resolveMovement(nextPlayers, intents, timeline, mapObjects, nextStains);
 
       for (const intent of intents) {
         if (cellsEqual(intent.from, intent.to)) continue;
@@ -679,6 +702,7 @@ export function resolveRound(
     players: nextPlayers.map((player) => ({ ...player, planSubmitted: false })),
     timeline,
     outcome: outcomeFrom(nextPlayers),
+    eggStains: nextStains,
   };
 }
 
@@ -695,7 +719,9 @@ export function applyResolvedRound(state: GameState, result: ResolveResult): Gam
       round: state.round,
       timeline: result.timeline,
       roundStart,
+      startEggStains: (state.eggStains ?? []).map((cell) => ({ ...cell })),
     },
+    eggStains: result.eggStains,
     players: result.players,
   };
 }
@@ -708,6 +734,7 @@ export function groupTimeline(timeline: PlaybackEvent[]): PlaybackEvent[][] {
   const kindOf = (event: PlaybackEvent): string => {
     switch (event.type) {
       case 'move':
+      case 'eggStain':
       case 'blocked':
         return 'step';
       case 'shot':
