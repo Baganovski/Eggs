@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import {
   BOARD_SIZE,
-  DIR_DELTA,
   MAX_WALK_STEPS,
+  PLAN_TIME_MS,
   STARTING_HP,
   type ArenaAction,
   type Cell,
@@ -14,6 +14,7 @@ import {
 import {
   bombSplashCells,
   cellsEqual,
+  completePartialPlan,
   directionFromRay,
   eventDurationMs,
   formatAction,
@@ -22,14 +23,17 @@ import {
   isAdjacent8,
   isAlive,
   isCardinalDir,
+  isCardinalWeapon,
   isObjectCell,
   isOnBoard,
-  knifeFanCells,
+  isReusableCard,
   neighbors8,
   parseAndValidatePlan,
   plannedPositionAfter,
   playerColor,
+  shotPlaybackCells,
   shotRayCells,
+  weaponFanCells,
   WEAPON_STATS,
 } from '../lib/arenaLogic';
 import { PlayerToken } from './PlayerToken';
@@ -44,9 +48,8 @@ interface ArenaProps {
 type OverlayTone = 'active' | 'muted';
 
 interface Beam {
-  from: Cell;
-  end: Cell;
   shooterId: string;
+  cells: Cell[];
 }
 
 interface TokenBump {
@@ -122,6 +125,9 @@ function shotCaption(tokens: Token[], frame: PlaybackEvent[], actionIndex: numbe
 }
 
 const WALK_STEPS_AFTER_SIT = 2;
+
+const PLANNER_HINT_WALK =
+  'Tap yourself to sit, then up to 2 squares to walk this move. Sit locks only if you open the next move or lock in. Walk onto a present to unwrap a spare weapon.';
 
 function planBeatNumbers(
   start: Cell,
@@ -202,9 +208,11 @@ async function runPlayback(options: {
   timeline: PlaybackEvent[];
   startTokens: Token[];
   startStains: Cell[];
+  startPresents: Cell[];
   cancelled: () => boolean;
   setTokens: (tokens: Token[]) => void;
   setStains: (stains: Cell[]) => void;
+  setPresents: (presents: Cell[]) => void;
   setBeams: (beams: Beam[]) => void;
   setBumps: (bumps: Record<string, TokenBump>) => void;
   setFlashIds: (ids: string[]) => void;
@@ -213,6 +221,7 @@ async function runPlayback(options: {
 }): Promise<void> {
   let current = options.startTokens;
   let stains = options.startStains;
+  let presents = options.startPresents;
   let actionIndex = 0;
   for (const frame of groupTimeline(options.timeline)) {
     if (options.cancelled()) return;
@@ -232,7 +241,7 @@ async function runPlayback(options: {
     } else if (first.type === 'shot') {
       const shots = frame.flatMap((event) =>
         event.type === 'shot'
-          ? [{ from: event.from, end: event.end, shooterId: event.shooterId }]
+          ? [{ shooterId: event.shooterId, cells: shotPlaybackCells(event) }]
           : [],
       );
       options.setBeams(shots);
@@ -244,15 +253,28 @@ async function runPlayback(options: {
           event.type === 'hit' || event.type === 'death' ? [event.playerId] : [],
         ),
       );
+    } else if (first.type === 'pickup') {
+      const pickups = frame.flatMap((event) => (event.type === 'pickup' ? [event] : []));
+      const labels = pickups.map((event) => {
+        const name = current.find((token) => token.id === event.playerId)?.name ?? 'Someone';
+        return `${name} unwraps ${formatWeapon(event.weapon)}`;
+      });
+      options.setStatus(`Move ${actionIndex + 1} · ${labels.join(' · ')}`);
     }
 
     const blocked = frame.flatMap((event) => (event.type === 'blocked' ? [event] : []));
     const freshStains = frame.flatMap((event) => (event.type === 'eggStain' ? [event.cell] : []));
+    const pickups = frame.flatMap((event) => (event.type === 'pickup' ? [event] : []));
     current = frame.reduce(applyEvent, current);
     options.setTokens(current);
     if (freshStains.length > 0) {
       stains = [...stains, ...freshStains];
       options.setStains(stains);
+    }
+    if (pickups.length > 0) {
+      const taken = new Set(pickups.map((event) => `${event.cell.row},${event.cell.col}`));
+      presents = presents.filter((cell) => !taken.has(`${cell.row},${cell.col}`));
+      options.setPresents(presents);
     }
 
     if (blocked.length > 0) {
@@ -287,19 +309,41 @@ async function runPlayback(options: {
   }
 }
 
-function onRay(from: Cell, end: Cell, cell: Cell): boolean {
-  const dir = directionFromRay(from, end);
-  if (!dir) return cellsEqual(from, cell);
-  let cursor = { ...from };
-  const seen = new Set<string>();
-  while (isOnBoard(cursor) && !seen.has(`${cursor.row},${cursor.col}`)) {
-    if (cellsEqual(cursor, cell) && !cellsEqual(cursor, from)) return true;
-    if (cellsEqual(cursor, end)) break;
-    seen.add(`${cursor.row},${cursor.col}`);
-    const delta = DIR_DELTA[dir];
-    cursor = { row: cursor.row + delta.dr, col: cursor.col + delta.dc };
-  }
-  return false;
+function PlanTimerFill({ deadlineAt }: { deadlineAt: number }) {
+  const [anim] = useState(() => {
+    const remaining = Math.max(0, deadlineAt - Date.now());
+    return {
+      remaining,
+      startScale: Math.min(1, remaining / PLAN_TIME_MS),
+    };
+  });
+  return (
+    <div
+      className="arena-timer-fill"
+      style={
+        {
+          '--timer-start': `${anim.startScale * 100}%`,
+          animationDuration: `${anim.remaining}ms`,
+        } as React.CSSProperties
+      }
+    />
+  );
+}
+
+function PlanTimerBar({ deadlineAt }: { deadlineAt: number | null }) {
+  const remaining = deadlineAt ? Math.max(0, deadlineAt - Date.now()) : 0;
+  return (
+    <div
+      className="arena-timer"
+      role="progressbar"
+      aria-label="Turn timer"
+      aria-valuemin={0}
+      aria-valuemax={PLAN_TIME_MS / 1000}
+      aria-valuenow={Math.ceil(remaining / 1000)}
+    >
+      {deadlineAt ? <PlanTimerFill key={deadlineAt} deadlineAt={deadlineAt} /> : null}
+    </div>
+  );
 }
 
 export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaProps) {
@@ -315,6 +359,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
   const [localLocked, setLocalLocked] = useState(false);
   const [tokens, setTokens] = useState<Token[]>(() => tokensFromState(state));
   const [stains, setStains] = useState<Cell[]>(() => state.eggStains ?? []);
+  const [presents, setPresents] = useState<Cell[]>(() => state.presents ?? []);
   const [beams, setBeams] = useState<Beam[]>([]);
   const [bumps, setBumps] = useState<Record<string, TokenBump>>({});
   const [flashIds, setFlashIds] = useState<string[]>([]);
@@ -323,6 +368,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
   const [watchingLast, setWatchingLast] = useState(false);
   const [status, setStatus] = useState('');
   const watchGen = useRef(0);
+  const submitDraftRef = useRef<() => void>(() => {});
   const canPlan = planning && localAlive && !local?.planSubmitted && !localLocked && !watchingLast;
 
   useEffect(() => {
@@ -339,13 +385,14 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     if (watchingLast) return;
     setTokens(tokensFromState(state));
     setStains(state.eggStains ?? []);
+    setPresents(state.presents ?? []);
     setBeams([]);
     setBumps({});
     setFlashIds([]);
     setShootingIds([]);
     setReplayDone(true);
     setStatus('');
-  }, [state.players, state.turnPhase, state.timeline.length, state.eggStains, watchingLast]);
+  }, [state.players, state.turnPhase, state.timeline.length, state.eggStains, state.presents, watchingLast]);
 
   const playbackKey = `${state.round}:${state.turnPhase}:${JSON.stringify(state.timeline)}`;
 
@@ -363,7 +410,9 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     setReplayDone(false);
     setTokens(tokensFromSnapshot(state, state.roundStart));
     const startStains = state.lastReplay?.startEggStains ?? [];
+    const startPresents = state.lastReplay?.startPresents ?? [];
     setStains(startStains);
+    setPresents(startPresents);
     setBeams([]);
     setBumps({});
     setFlashIds([]);
@@ -374,9 +423,11 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         timeline: state.timeline,
         startTokens: tokensFromSnapshot(state, state.roundStart),
         startStains,
+        startPresents,
         cancelled: () => cancelled,
         setTokens,
         setStains,
+        setPresents,
         setBeams,
         setBumps,
         setFlashIds,
@@ -386,6 +437,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
       if (cancelled) return;
       setTokens(tokensFromState(state));
       setStains(state.eggStains ?? []);
+      setPresents(state.presents ?? []);
       setBeams([]);
       setBumps({});
       setFlashIds([]);
@@ -476,8 +528,9 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         const key = `${cell.row},${cell.col}`;
         if (tone === 'active' || tones.get(key) !== 'active') tones.set(key, tone);
       };
-      if (action.weapon === 'knife') {
-        for (const cell of knifeFanCells(from, action.dir)) mark(cell);
+      const fan = weaponFanCells(action.weapon, from, action.dir);
+      if (fan) {
+        for (const cell of fan) mark(cell);
         return;
       }
       const ray = shotRayCells(from, action.dir, state.mapObjects, WEAPON_STATS[action.weapon].range);
@@ -562,7 +615,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
   const chooseCard = (card: PlanCard) => {
     if (!canPlan) return;
     const other = slot === 0 ? 1 : 0;
-    if (card.kind !== 'move' && slotCards[other] === card.id) return;
+    if (!isReusableCard(card) && slotCards[other] === card.id) return;
 
     const current = draft[slot];
     const slotFilled = current !== null || pendingSit[slot];
@@ -618,10 +671,10 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
       return;
     }
 
-    if (selectedCard.kind === 'knife') {
+    if (isCardinalWeapon(selectedCard.kind)) {
       const dir = directionFromRay(origin, cell);
       if (dir && isCardinalDir(dir)) {
-        setAction(slot, { type: 'shoot', weapon: 'knife', dir });
+        setAction(slot, { type: 'shoot', weapon: selectedCard.kind, dir });
       }
       return;
     }
@@ -651,6 +704,26 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     onSubmitPlan({ cardIds: [slotCards[0], slotCards[1]], actions: legalPlan });
   };
 
+  const submitDraftOrSit = () => {
+    if (!local || !localAlive || local.planSubmitted || localLocked) return;
+    const completed = completePartialPlan(local, resolvedDraft, slotCards, state.mapObjects);
+    if (!completed) return;
+    setLocalLocked(true);
+    onSubmitPlan(completed);
+  };
+  submitDraftRef.current = submitDraftOrSit;
+
+  useEffect(() => {
+    if (!planning || !localAlive || local?.planSubmitted || localLocked) return;
+    const deadline = state.planDeadlineAt;
+    if (!deadline) return;
+    const wait = Math.max(0, deadline - Date.now());
+    const timer = window.setTimeout(() => {
+      submitDraftRef.current();
+    }, wait);
+    return () => window.clearTimeout(timer);
+  }, [planning, localAlive, local?.planSubmitted, localLocked, state.planDeadlineAt, state.round]);
+
   const watchLastTurn = () => {
     const replay = state.lastReplay;
     if (!replay || watchingLast) return;
@@ -664,16 +737,20 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     setShootingIds([]);
     const startTokens = tokensFromSnapshot(state, replay.roundStart);
     const startStains = replay.startEggStains ?? [];
+    const startPresents = replay.startPresents ?? [];
     setTokens(startTokens);
     setStains(startStains);
+    setPresents(startPresents);
     void (async () => {
       await runPlayback({
         timeline: replay.timeline,
         startTokens,
         startStains,
+        startPresents,
         cancelled: () => watchGen.current !== gen,
         setTokens,
         setStains,
+        setPresents,
         setBeams,
         setBumps,
         setFlashIds,
@@ -683,6 +760,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
       if (watchGen.current !== gen) return;
       setTokens(tokensFromState(state));
       setStains(state.eggStains ?? []);
+      setPresents(state.presents ?? []);
       setBeams([]);
       setBumps({});
       setFlashIds([]);
@@ -712,16 +790,20 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         : !planning
           ? status || 'Watching the carton…'
           : selectedCard?.kind === 'move'
-            ? 'Tap yourself to sit, then up to 2 squares to walk this move. Sit locks only if you open the next move or lock in. Walls block movement and shots.'
-            : selectedCard?.kind === 'knife'
-              ? 'Tap north, east, south, or west. The knife hits the three squares in that facing. Two damage.'
-              : selectedCard?.kind === 'bomb'
-                ? 'Tap a cell on the line, up to 2 squares. The bomb hits that cell and the four cardinal neighbors.'
-                : selectedCard?.kind === 'shotgun'
-                  ? 'Tap a cell on the line, up to 3 squares. Two damage.'
-                  : selectedCard?.kind === 'pistol'
-                    ? 'Tap a cell on the line you want. Unlimited range, one damage.'
-                    : 'Pick a card for this move.';
+            ? PLANNER_HINT_WALK
+            : selectedCard?.kind === 'slap'
+              ? 'Tap north, east, south, or west. The slap hits the three squares in that facing. Two damage.'
+              : selectedCard?.kind === 'flamethrower'
+                ? 'Tap north, east, south, or west. The flame hits two squares ahead, and the sides of the second square. Two damage.'
+                : selectedCard?.kind === 'bomb'
+                  ? 'Tap a cell on the line, up to 2 squares. The bomb hits that cell and the four cardinal neighbors. Two damage.'
+                  : selectedCard?.kind === 'shotgun'
+                    ? 'Tap a cell on the line, up to 3 squares. Two damage.'
+                    : selectedCard?.kind === 'rifle'
+                      ? 'Tap a cell on the line you want. Unlimited range, two damage.'
+                      : selectedCard?.kind === 'pistol'
+                        ? 'Tap a cell on the line, up to 3 squares. One damage. Unlimited ammo.'
+                        : 'Pick Walk, Action, or your spare. Walk onto a present to fill the spare slot.';
 
   const showPlanner = state.phase === 'playing';
 
@@ -729,11 +811,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     <div className="arena">
       <div className="arena-status-row">
         <p className="arena-kicker">
-          {state.phase === 'finished'
-            ? 'All scrambled'
-            : planning
-              ? `Round ${state.round}`
-              : `Round ${state.round} · cracking`}
+          {state.phase === 'finished' ? 'All scrambled' : `Round ${state.round}`}
         </p>
         <p className="arena-meta-inline">
           {watchingLast
@@ -784,8 +862,11 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         ))}
       </ul>
 
-      <div className="arena-board-wrap">
-        <div className="arena-board" style={{ gridTemplateColumns: `repeat(${BOARD_SIZE}, 1fr)` }}>
+      <div className="arena-stage">
+        <PlanTimerBar deadlineAt={planning ? state.planDeadlineAt : null} />
+        <div className="arena-board-slot">
+          <div className="arena-board-wrap">
+            <div className="arena-board" style={{ gridTemplateColumns: `repeat(${BOARD_SIZE}, 1fr)` }}>
           {Array.from({ length: BOARD_SIZE * BOARD_SIZE }, (_, index) => {
             const row = Math.floor(index / BOARD_SIZE);
             const col = index % BOARD_SIZE;
@@ -797,11 +878,12 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             const isValid = validWalk.some((step) => cellsEqual(step, cell));
             const isOrigin = canPlan && cellsEqual(origin, cell);
             const hasBlock = isObjectCell(cell, state.mapObjects);
+            const hasPresent = presents.some((present) => cellsEqual(present, cell));
             const occupants = tokens
               .filter((token) => token.row === row && token.col === col)
               .sort((a, b) => a.hp - b.hp);
             const cellStains = stains.filter((stain) => stain.row === row && stain.col === col);
-            const beam = beams.find((ray) => onRay(ray.from, ray.end, cell));
+            const beam = beams.find((ray) => ray.cells.some((highlight) => cellsEqual(highlight, cell)));
             const beamShooter = beam
               ? tokens.find((token) => token.id === beam.shooterId)
               : undefined;
@@ -818,7 +900,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                   isValid ? ' is-valid' : ''
                 }${isOrigin ? ' is-origin' : ''}${beam ? ' on-beam' : ''}${
                   hasBlock ? ' has-block' : ''
-                }`}
+                }${hasPresent ? ' has-present' : ''}`}
                 style={
                   {
                     '--cell-row': row,
@@ -832,6 +914,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
               >
                 {pathIndex > 0 && <span className="path-index">{pathIndex}</span>}
                 {hasBlock && <BlockMark />}
+                {hasPresent && <PresentMark />}
                 {cellStains.map((_, stainIndex) => (
                   <EggWhiteBlob key={`stain-${stainIndex}`} index={stainIndex} />
                 ))}
@@ -851,6 +934,8 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
               </button>
             );
           })}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -872,12 +957,31 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
           </div>
 
           <div className="hand-row">
-            {(local?.hand ?? []).map((card, cardIndex) => {
+            {(['move', 'pistol', 'spare'] as const).map((slotKind) => {
+              const card =
+                slotKind === 'move'
+                  ? local?.hand.find((entry) => entry.kind === 'move')
+                  : slotKind === 'pistol'
+                    ? local?.hand.find((entry) => entry.kind === 'pistol')
+                    : local?.hand.find((entry) => entry.kind !== 'move' && entry.kind !== 'pistol');
+              const label = slotKind === 'move' ? 'Move' : 'Action';
+              if (!card) {
+                return (
+                  <button
+                    key={slotKind}
+                    type="button"
+                    className="plan-card is-empty"
+                    disabled
+                  >
+                    <span className="plan-card-label">{label}</span>
+                    <span>Empty</span>
+                  </button>
+                );
+              }
               const other = slot === 0 ? 1 : 0;
-              const usedElsewhere = card.kind !== 'move' && slotCards[other] === card.id;
+              const usedElsewhere = !isReusableCard(card) && slotCards[other] === card.id;
               const selected = slotCards[slot] === card.id;
-              const label = card.kind === 'move' ? 'Move' : `Action ${cardIndex}`;
-              const title = card.kind === 'move' ? 'Move' : formatWeapon(card.kind);
+              const title = card.kind === 'move' ? 'Walk' : formatWeapon(card.kind);
               return (
                 <button
                   key={card.id}
@@ -895,7 +999,12 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             })}
           </div>
 
-          <p className="arena-hint">{plannerHint}</p>
+          <div className="arena-hint-box">
+            <p className="arena-hint is-sizer" aria-hidden="true">
+              {PLANNER_HINT_WALK}
+            </p>
+            <p className="arena-hint">{plannerHint}</p>
+          </div>
 
           <div className="planner-actions">
             <div className="planner-tools">
@@ -922,7 +1031,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
               disabled={!canPlan || !legalPlan}
               onClick={lockIn}
             >
-              Egg
+              Scramble
             </button>
           </div>
         </div>
@@ -954,7 +1063,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             Rewatch
           </button>
           <button type="button" className="btn btn-primary" onClick={onReturnToLobby}>
-            That&apos;s Egg
+            That&apos;s Eggs
           </button>
         </div>
       )}
@@ -973,6 +1082,43 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         </div>
       )}
     </div>
+  );
+}
+
+function PresentMark() {
+  return (
+    <span className="arena-present" aria-hidden="true">
+      <svg viewBox="0 0 32 32">
+        <rect
+          x="6"
+          y="13"
+          width="20"
+          height="14"
+          rx="2"
+          fill="#f6c7d4"
+          stroke="#111"
+          strokeWidth="2.2"
+        />
+        <rect x="14.4" y="13" width="3.2" height="14" fill="#c5e4ea" stroke="#111" strokeWidth="1.4" />
+        <rect
+          x="6"
+          y="10"
+          width="20"
+          height="5"
+          rx="1.5"
+          fill="#d4ead0"
+          stroke="#111"
+          strokeWidth="2.2"
+        />
+        <path
+          d="M16 10 C16 6.5 12.5 6.2 11.4 8.6 C10.6 10.2 13.4 11.2 16 10 C16 6.5 19.5 6.2 20.6 8.6 C21.4 10.2 18.6 11.2 16 10 Z"
+          fill="#f6e7b4"
+          stroke="#111"
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </span>
   );
 }
 

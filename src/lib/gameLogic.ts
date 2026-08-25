@@ -27,6 +27,7 @@ export function createInitialPlayer(
     row: 0,
     col: 0,
     hand: [],
+    spareWeapon: null,
   };
 }
 
@@ -91,6 +92,7 @@ export function createBotPlayer(joinOrder: number, existingNames: string[]): Pla
     row: 0,
     col: 0,
     hand: [],
+    spareWeapon: null,
   };
 }
 

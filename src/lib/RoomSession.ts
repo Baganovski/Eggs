@@ -8,7 +8,7 @@ import type {
   RoomCallbacks,
   RoomMessage,
 } from '../types/game';
-import { MAX_PLAYERS, MIN_PLAYERS } from '../types/game';
+import { MAX_PLAYERS, MIN_PLAYERS, PLAN_DEADLINE_GRACE_MS } from '../types/game';
 import {
   applyResolvedRound,
   beginPlanningRound,
@@ -56,6 +56,7 @@ export class RoomSession {
   private playbackTimer: ReturnType<typeof setTimeout> | null = null;
   private botPlanGeneration = 0;
   private botTimers: ReturnType<typeof setTimeout>[] = [];
+  private planTimer: ReturnType<typeof setTimeout> | null = null;
 
   private constructor(state: GameState, callbacks: RoomCallbacks) {
     this.state = state;
@@ -142,6 +143,7 @@ export class RoomSession {
     this.destroyed = true;
     this.clearPlaybackTimer();
     this.clearBotTimers();
+    this.clearPlanTimer();
     this.pendingPlans.clear();
     for (const connection of this.connections.values()) {
       connection.close();
@@ -150,6 +152,46 @@ export class RoomSession {
     this.hostConnection = null;
     this.peer?.destroy();
     this.peer = null;
+  }
+
+  private clearPlanTimer(): void {
+    if (this.planTimer !== null) {
+      clearTimeout(this.planTimer);
+      this.planTimer = null;
+    }
+  }
+
+  private schedulePlanDeadline(): void {
+    this.clearPlanTimer();
+    if (!this.isHost) return;
+    if (this.state.phase !== 'playing' || this.state.turnPhase !== 'planning') return;
+    const deadline = this.state.planDeadlineAt;
+    if (!deadline) return;
+    const wait = Math.max(0, deadline - Date.now()) + PLAN_DEADLINE_GRACE_MS;
+    this.planTimer = setTimeout(() => {
+      this.planTimer = null;
+      if (this.destroyed || !this.isHost) return;
+      this.forceUnsubmittedPlans();
+    }, wait);
+  }
+
+  private forceUnsubmittedPlans(): void {
+    if (this.state.phase !== 'playing' || this.state.turnPhase !== 'planning') return;
+    let filled = false;
+    for (const player of this.state.players.filter(isAlive)) {
+      if (this.pendingPlans.has(player.id)) continue;
+      this.pendingPlans.set(player.id, STAY_PLAN);
+      filled = true;
+    }
+    if (filled) {
+      this.state = {
+        ...this.state,
+        players: this.state.players.map((player) =>
+          isAlive(player) && !player.planSubmitted ? { ...player, planSubmitted: true } : player,
+        ),
+      };
+    }
+    this.tryResolveIfReady();
   }
 
   private clearPlaybackTimer(): void {
@@ -186,7 +228,7 @@ export class RoomSession {
   private submitBotPlan(playerId: string): void {
     const player = this.state.players.find((entry) => entry.id === playerId);
     if (!player?.isBot) return;
-    const plan = chooseBotPlan(player, this.state.players, this.state.mapObjects);
+    const plan = chooseBotPlan(player, this.state.players, this.state.mapObjects, this.state.presents ?? []);
     this.handlePlayerAction(playerId, {
       type: 'submitPlan',
       cardIds: plan.cardIds,
@@ -242,8 +284,10 @@ export class RoomSession {
       this.pendingPlans,
       this.state.mapObjects,
       this.state.eggStains ?? [],
+      this.state.presents ?? [],
     );
     this.pendingPlans.clear();
+    this.clearPlanTimer();
     this.state = applyResolvedRound(this.state, result);
     this.syncState();
 
@@ -258,6 +302,7 @@ export class RoomSession {
       this.state = beginPlanningRound(this.state);
       this.syncState();
       this.scheduleBotPlans();
+      this.schedulePlanDeadline();
     }, delay);
   }
 
@@ -580,10 +625,12 @@ export class RoomSession {
     this.pendingPlans.clear();
     this.clearPlaybackTimer();
     this.clearBotTimers();
+    this.clearPlanTimer();
     this.state = startMatch(this.state);
     this.broadcast({ type: 'start', startedBy });
     this.syncState();
     this.scheduleBotPlans();
+    this.schedulePlanDeadline();
   }
 
   private handlePlayerAction(playerId: string, action: PlayerAction): void {
@@ -596,6 +643,7 @@ export class RoomSession {
     if (next === this.state) return;
     this.clearPlaybackTimer();
     this.clearBotTimers();
+    this.clearPlanTimer();
     this.pendingPlans.clear();
     this.state = next;
     this.syncState();
@@ -692,6 +740,7 @@ export class RoomSession {
     this.emitNotice('You are now the hen.');
     this.clearPlaybackTimer();
     this.clearBotTimers();
+    this.clearPlanTimer();
     this.pendingPlans.clear();
     this.state = resetPlanningAfterHandoff(this.state);
     for (const connection of this.connections.values()) {
@@ -711,6 +760,7 @@ export class RoomSession {
     });
     this.emitState();
     this.scheduleBotPlans();
+    this.schedulePlanDeadline();
   }
 
   private mapConnectionToPlayer(connection: DataConnection, playerId: string): void {

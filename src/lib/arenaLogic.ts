@@ -4,8 +4,10 @@ import {
   DIR_DELTA,
   DIRECTIONS,
   MAX_WALK_STEPS,
+  PLAN_TIME_MS,
   PLAYER_HUES,
   STARTING_HP,
+  PICKUP_WEAPON_KINDS,
   WEAPON_KINDS,
   type ArenaAction,
   type CardinalDir,
@@ -29,15 +31,18 @@ export const START_CORNERS: Cell[] = [
 ];
 
 export const OBSTACLE_COUNT = 3;
+export const MAX_PRESENTS = 2;
 
 export const WEAPON_STATS: Record<WeaponKind, { range: number; damage: number }> = {
-  pistol: { range: Number.POSITIVE_INFINITY, damage: 1 },
+  pistol: { range: 3, damage: 1 },
+  rifle: { range: Number.POSITIVE_INFINITY, damage: 2 },
   shotgun: { range: 3, damage: 2 },
-  bomb: { range: 2, damage: 1 },
-  knife: { range: 1, damage: 2 },
+  bomb: { range: 2, damage: 2 },
+  slap: { range: 1, damage: 2 },
+  flamethrower: { range: 2, damage: 2 },
 };
 
-const KNIFE_FAN: Record<CardinalDir, Direction[]> = {
+const SLAP_FAN: Record<CardinalDir, Direction[]> = {
   N: ['NW', 'N', 'NE'],
   E: ['NE', 'E', 'SE'],
   S: ['SE', 'S', 'SW'],
@@ -56,29 +61,42 @@ export function formatWeapon(kind: WeaponKind): string {
   return kind[0].toUpperCase() + kind.slice(1);
 }
 
-export function dealHand(): PlanCard[] {
-  const pool = [...WEAPON_KINDS];
-  for (let i = pool.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  return [
+export function isReusableCard(card: PlanCard): boolean {
+  return card.kind === 'move' || card.kind === 'pistol';
+}
+
+export function randomPickupWeapon(): WeaponKind {
+  const index = Math.floor(Math.random() * PICKUP_WEAPON_KINDS.length);
+  return PICKUP_WEAPON_KINDS[index] ?? 'rifle';
+}
+
+export function dealHand(spareWeapon: WeaponKind | null = null): PlanCard[] {
+  const cards: PlanCard[] = [
     { id: crypto.randomUUID(), kind: 'move' },
-    { id: crypto.randomUUID(), kind: pool[0] },
-    { id: crypto.randomUUID(), kind: pool[1] },
+    { id: crypto.randomUUID(), kind: 'pistol' },
   ];
+  if (spareWeapon) {
+    cards.push({ id: crypto.randomUUID(), kind: spareWeapon });
+  }
+  return cards;
 }
 
 export function dealHands(players: Player[]): Player[] {
-  return players.map((player) => ({
-    ...player,
-    planSubmitted: false,
-    hand: isAlive(player) ? dealHand() : [],
-  }));
+  return players.map((player) => {
+    const spareWeapon = player.spareWeapon ?? null;
+    return {
+      ...player,
+      planSubmitted: false,
+      spareWeapon: isAlive(player) ? spareWeapon : null,
+      hand: isAlive(player) ? dealHand(spareWeapon) : [],
+    };
+  });
 }
 
 export function hideOtherHands(players: Player[], viewerId: string): Player[] {
-  return players.map((player) => (player.id === viewerId ? player : { ...player, hand: [] }));
+  return players.map((player) =>
+    player.id === viewerId ? player : { ...player, hand: [], spareWeapon: null },
+  );
 }
 
 export function viewStateFor(state: GameState, viewerId: string): PublicGameState {
@@ -89,14 +107,35 @@ export function viewStateFor(state: GameState, viewerId: string): PublicGameStat
   };
 }
 
-export function knifeFanCells(from: Cell, dir: Direction): Cell[] {
+export function slapFanCells(from: Cell, dir: Direction): Cell[] {
   if (!isCardinalDir(dir)) return [];
-  return KNIFE_FAN[dir]
+  return SLAP_FAN[dir]
     .map((facing) => {
       const delta = DIR_DELTA[facing];
       return { row: from.row + delta.dr, col: from.col + delta.dc };
     })
     .filter(isOnBoard);
+}
+
+export function flameCells(from: Cell, dir: Direction): Cell[] {
+  if (!isCardinalDir(dir)) return [];
+  const forward = DIR_DELTA[dir];
+  const side = dir === 'N' || dir === 'S' ? { dr: 0, dc: 1 } : { dr: 1, dc: 0 };
+  const first = { row: from.row + forward.dr, col: from.col + forward.dc };
+  const second = { row: from.row + forward.dr * 2, col: from.col + forward.dc * 2 };
+  const left = { row: second.row - side.dr, col: second.col - side.dc };
+  const right = { row: second.row + side.dr, col: second.col + side.dc };
+  return [first, second, left, right].filter(isOnBoard);
+}
+
+export function weaponFanCells(weapon: WeaponKind, from: Cell, dir: Direction): Cell[] | null {
+  if (weapon === 'slap') return slapFanCells(from, dir);
+  if (weapon === 'flamethrower') return flameCells(from, dir);
+  return null;
+}
+
+export function isCardinalWeapon(weapon: WeaponKind): boolean {
+  return weapon === 'slap' || weapon === 'flamethrower';
 }
 
 export function bombSplashCells(epicenter: Cell): Cell[] {
@@ -148,6 +187,7 @@ const PLAYBACK_MS: Record<PlaybackEvent['type'], number> = {
   move: 380,
   eggStain: 0,
   blocked: 400,
+  pickup: 280,
 };
 
 export function playerColor(joinOrder: number): string {
@@ -221,6 +261,40 @@ export function directionFromRay(from: Cell, to: Cell): Direction | null {
   return match ?? null;
 }
 
+export function cellsOnRay(from: Cell, end: Cell): Cell[] {
+  const dir = directionFromRay(from, end);
+  if (!dir) return cellsEqual(from, end) ? [] : [{ ...end }];
+  const cells: Cell[] = [];
+  let cursor = { ...from };
+  const seen = new Set<string>();
+  while (isOnBoard(cursor) && !seen.has(`${cursor.row},${cursor.col}`)) {
+    if (!cellsEqual(cursor, from)) cells.push({ ...cursor });
+    if (cellsEqual(cursor, end)) break;
+    seen.add(`${cursor.row},${cursor.col}`);
+    const delta = DIR_DELTA[dir];
+    cursor = { row: cursor.row + delta.dr, col: cursor.col + delta.dc };
+  }
+  return cells;
+}
+
+export function shotPlaybackCells(shot: {
+  weapon: WeaponKind;
+  from: Cell;
+  end: Cell;
+  dir: Direction;
+  fan?: Cell[];
+  splash?: Cell[];
+}): Cell[] {
+  const fan = weaponFanCells(shot.weapon, shot.from, shot.dir);
+  if (fan) {
+    return shot.fan ?? fan;
+  }
+  if (shot.weapon === 'bomb') {
+    return [shot.end, ...(shot.splash ?? bombSplashCells(shot.end))];
+  }
+  return cellsOnRay(shot.from, shot.end);
+}
+
 export function neighbors8(cell: Cell): Cell[] {
   return DIRECTIONS.map((dir) => {
     const delta = DIR_DELTA[dir];
@@ -258,7 +332,7 @@ function parseAction(value: unknown): ArenaAction | null {
   const action = value as ArenaAction;
   if (action.type === 'stay') return { type: 'stay' };
   if (action.type === 'shoot' && isWeaponKind(action.weapon) && isDirection(action.dir)) {
-    if (action.weapon === 'knife' && !isCardinalDir(action.dir)) return null;
+    if (isCardinalWeapon(action.weapon) && !isCardinalDir(action.dir)) return null;
     return { type: 'shoot', weapon: action.weapon, dir: action.dir };
   }
   if (action.type === 'walk' && Array.isArray(action.path) && action.path.every(isCell)) {
@@ -287,7 +361,7 @@ export function parseAndValidatePlan(
   const firstCard = player.hand.find((card) => card.id === firstId);
   const secondCard = player.hand.find((card) => card.id === secondId);
   if (!firstCard || !secondCard) return null;
-  if (firstId === secondId && firstCard.kind !== 'move') return null;
+  if (firstId === secondId && !isReusableCard(firstCard)) return null;
 
   const first = parseAction(actions[0]);
   const second = parseAction(actions[1]);
@@ -304,6 +378,56 @@ export function parseAndValidatePlan(
   return [first, second];
 }
 
+function cardForAction(
+  player: Player,
+  action: ArenaAction,
+  preferredId: string | null,
+): PlanCard | null {
+  const preferred = preferredId
+    ? player.hand.find((card) => card.id === preferredId)
+    : undefined;
+  if (preferred && actionMatchesCard(action, preferred)) return preferred;
+  return player.hand.find((card) => actionMatchesCard(action, card)) ?? null;
+}
+
+export function completePartialPlan(
+  player: Player,
+  actions: [ArenaAction | null, ArenaAction | null],
+  cardIds: [string | null, string | null],
+  mapObjects: Cell[],
+): { cardIds: [string, string]; actions: [ArenaAction, ArenaAction] } | null {
+  const resolved: [ArenaAction, ArenaAction] = [{ type: 'stay' }, { type: 'stay' }];
+  let position = { row: player.row, col: player.col };
+  for (const index of [0, 1] as const) {
+    const action = actions[index] ?? { type: 'stay' };
+    if (action.type === 'walk') {
+      if (
+        cardForAction(player, action, cardIds[index]) &&
+        isWalkLegal(position, action.path, mapObjects)
+      ) {
+        resolved[index] = action;
+        position = action.path[action.path.length - 1];
+      }
+      continue;
+    }
+    if (action.type === 'shoot' && cardForAction(player, action, cardIds[index])) {
+      resolved[index] = action;
+    }
+  }
+
+  const firstCard = cardForAction(player, resolved[0], cardIds[0]);
+  const secondCard = cardForAction(player, resolved[1], cardIds[1]);
+  if (!firstCard || !secondCard) return null;
+  const plan = parseAndValidatePlan(
+    player,
+    resolved,
+    [firstCard.id, secondCard.id],
+    mapObjects,
+  );
+  if (!plan) return null;
+  return { cardIds: [firstCard.id, secondCard.id], actions: plan };
+}
+
 export function emptyArenaFields(): Pick<
   GameState,
   | 'turnPhase'
@@ -314,6 +438,8 @@ export function emptyArenaFields(): Pick<
   | 'lastReplay'
   | 'mapObjects'
   | 'eggStains'
+  | 'presents'
+  | 'planDeadlineAt'
 > {
   return {
     turnPhase: 'planning',
@@ -324,6 +450,8 @@ export function emptyArenaFields(): Pick<
     lastReplay: null,
     mapObjects: [],
     eggStains: [],
+    presents: [],
+    planDeadlineAt: null,
   };
 }
 
@@ -336,7 +464,8 @@ export function startArenaMatch(state: GameState): GameState {
       row: corner.row,
       col: corner.col,
       planSubmitted: false,
-      hand: dealHand(),
+      spareWeapon: null,
+      hand: dealHand(null),
     };
   });
   const mapObjects = generateMapObjects(players.map((player) => ({ row: player.row, col: player.col })));
@@ -352,7 +481,9 @@ export function startArenaMatch(state: GameState): GameState {
     lastReplay: null,
     mapObjects,
     eggStains: [],
+    presents: [],
     players,
+    planDeadlineAt: Date.now() + PLAN_TIME_MS,
   };
 }
 
@@ -374,6 +505,7 @@ export function beginPlanningRound(state: GameState): GameState {
     timeline: [],
     roundStart: null,
     players: dealHands(state.players),
+    planDeadlineAt: Date.now() + PLAN_TIME_MS,
   };
 }
 
@@ -387,6 +519,7 @@ export function resetPlanningAfterHandoff(state: GameState): GameState {
       ...player,
       planSubmitted: false,
     })),
+    planDeadlineAt: state.phase === 'playing' ? Date.now() + PLAN_TIME_MS : null,
   };
 }
 
@@ -398,6 +531,7 @@ export function resetArenaPlayers(players: Player[]): Player[] {
     row: 0,
     col: 0,
     hand: [],
+    spareWeapon: null,
   }));
 }
 
@@ -406,6 +540,7 @@ export interface ResolveResult {
   timeline: PlaybackEvent[];
   outcome: MatchOutcome;
   eggStains: Cell[];
+  presents: Cell[];
 }
 
 function living(players: Player[]): Player[] {
@@ -567,15 +702,108 @@ function outcomeFrom(players: Player[]): MatchOutcome {
   return { kind: 'none' };
 }
 
+function isPresentBlocked(
+  cell: Cell,
+  players: Player[],
+  mapObjects: Cell[],
+  presents: Cell[],
+): boolean {
+  if (isObjectCell(cell, mapObjects)) return true;
+  if (presents.some((present) => cellsEqual(present, cell))) return true;
+  return players.some((player) => cellsEqual(player, cell));
+}
+
+export function pickPresentSpawn(
+  players: Player[],
+  mapObjects: Cell[],
+  presents: Cell[],
+): Cell | null {
+  if (presents.length >= MAX_PRESENTS) return null;
+  const adjacent: Cell[] = [];
+  const seen = new Set<string>();
+  for (const player of living(players)) {
+    for (const cell of neighbors8(player)) {
+      const key = `${cell.row},${cell.col}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (!isPresentBlocked(cell, players, mapObjects, presents)) adjacent.push(cell);
+    }
+  }
+  const pool =
+    adjacent.length > 0
+      ? adjacent
+      : (() => {
+          const open: Cell[] = [];
+          for (let row = 0; row < BOARD_SIZE; row += 1) {
+            for (let col = 0; col < BOARD_SIZE; col += 1) {
+              const cell = { row, col };
+              if (!isPresentBlocked(cell, players, mapObjects, presents)) open.push(cell);
+            }
+          }
+          return open;
+        })();
+  if (pool.length === 0) return null;
+  return pool[Math.floor(Math.random() * pool.length)] ?? null;
+}
+
+export function spawnEndOfTurnPresent(
+  players: Player[],
+  mapObjects: Cell[],
+  presents: Cell[],
+): Cell[] {
+  const next = presents.map((cell) => ({ ...cell }));
+  const spawned = pickPresentSpawn(players, mapObjects, next);
+  if (!spawned) return next;
+  return [...next, spawned];
+}
+
+function withSpareWeapon(player: Player, weapon: WeaponKind): Player {
+  const kept = player.hand.filter((card) => card.kind === 'move' || card.kind === 'pistol');
+  return {
+    ...player,
+    spareWeapon: weapon,
+    hand: [...kept, { id: crypto.randomUUID(), kind: weapon }],
+  };
+}
+
+function collectPresents(
+  players: Player[],
+  presents: Cell[],
+  timeline: PlaybackEvent[],
+): { players: Player[]; presents: Cell[] } {
+  let nextPresents = presents.map((cell) => ({ ...cell }));
+  let nextPlayers = players;
+  for (const player of living(nextPlayers)) {
+    const index = nextPresents.findIndex((cell) => cellsEqual(cell, player));
+    if (index < 0) continue;
+    const cell = nextPresents[index];
+    nextPresents = nextPresents.filter((_, presentIndex) => presentIndex !== index);
+    const weapon = randomPickupWeapon();
+    timeline.push({ type: 'pickup', playerId: player.id, cell, weapon });
+    nextPlayers = nextPlayers.map((entry) =>
+      entry.id === player.id ? withSpareWeapon(entry, weapon) : entry,
+    );
+  }
+  return { players: nextPlayers, presents: nextPresents };
+}
+
 export function resolveRound(
   players: Player[],
   plans: Map<string, [ArenaAction, ArenaAction]>,
   mapObjects: Cell[],
   eggStains: Cell[] = [],
+  presents: Cell[] = [],
 ): ResolveResult {
   let nextPlayers = players.map((player) => ({ ...player }));
   const timeline: PlaybackEvent[] = [];
   const nextStains = eggStains.map((cell) => ({ ...cell }));
+  let nextPresents = presents.map((cell) => ({ ...cell }));
+
+  const takePresents = () => {
+    const collected = collectPresents(nextPlayers, nextPresents, timeline);
+    nextPlayers = collected.players;
+    nextPresents = collected.presents;
+  };
 
   for (const actionIndex of [0, 1] as const) {
     const actors = living(nextPlayers);
@@ -623,6 +851,8 @@ export function resolveRound(
         }
       }
 
+      takePresents();
+
       if (beat !== 0) continue;
 
       const snapshot = nextPlayers.map((player) => ({ ...player }));
@@ -633,23 +863,29 @@ export function resolveRound(
         if (action?.type !== 'shoot') continue;
         const from = { row: player.row, col: player.col };
 
-        if (action.weapon === 'knife') {
-          const fan = knifeFanCells(from, action.dir);
+        const fan = weaponFanCells(action.weapon, from, action.dir);
+        if (fan) {
           const struck = fan
             .map((cell) => occupantAt(snapshot, cell, player.id))
             .filter((target): target is Player => Boolean(target));
+          const delta = DIR_DELTA[action.dir];
+          const second = { row: from.row + delta.dr * 2, col: from.col + delta.dc * 2 };
+          const tip =
+            action.weapon === 'flamethrower' && isOnBoard(second)
+              ? second
+              : (fan[1] ?? fan[0] ?? from);
           timeline.push({
             type: 'shot',
             shooterId: player.id,
-            weapon: 'knife',
+            weapon: action.weapon,
             dir: action.dir,
             from,
-            end: fan[1] ?? fan[0] ?? from,
+            end: tip,
             fan,
             hitPlayerId: struck[0]?.id,
           });
           for (const target of struck) {
-            addHit(hits, target.id, WEAPON_STATS.knife.damage);
+            addHit(hits, target.id, WEAPON_STATS[action.weapon].damage);
           }
           continue;
         }
@@ -678,7 +914,7 @@ export function resolveRound(
         if (splash) {
           for (const cell of splash) {
             const splashed = occupantAt(snapshot, cell);
-            if (splashed) addHit(hits, splashed.id, 1);
+            if (splashed) addHit(hits, splashed.id, stats.damage);
           }
         }
       }
@@ -703,11 +939,17 @@ export function resolveRound(
     timeline,
     outcome: outcomeFrom(nextPlayers),
     eggStains: nextStains,
+    presents: nextPresents,
   };
 }
 
 export function applyResolvedRound(state: GameState, result: ResolveResult): GameState {
   const roundStart = snapshotTokens(state.players);
+  const startPresents = (state.presents ?? []).map((cell) => ({ ...cell }));
+  const presents =
+    result.outcome.kind === 'none'
+      ? spawnEndOfTurnPresent(result.players, state.mapObjects, result.presents)
+      : result.presents;
   return {
     ...state,
     phase: result.outcome.kind === 'none' ? 'playing' : 'finished',
@@ -720,9 +962,12 @@ export function applyResolvedRound(state: GameState, result: ResolveResult): Gam
       timeline: result.timeline,
       roundStart,
       startEggStains: (state.eggStains ?? []).map((cell) => ({ ...cell })),
+      startPresents,
     },
     eggStains: result.eggStains,
+    presents,
     players: result.players,
+    planDeadlineAt: null,
   };
 }
 

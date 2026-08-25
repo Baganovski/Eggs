@@ -88,7 +88,7 @@ export function RoomShell({
             />
 
             {isHost ? (
-              <>
+              <div className="lobby-actions">
                 {connectedCount < MAX_PLAYERS && (
                   <button type="button" className="btn btn-secondary" onClick={onAddBot}>
                     Add a bot
@@ -104,7 +104,7 @@ export function RoomShell({
                     ? 'Crack on'
                     : `Need ${MIN_PLAYERS}+ eggs (${connectedCount}/${MAX_PLAYERS})`}
                 </button>
-              </>
+              </div>
             ) : (
               <p className="waiting-host">Waiting on the hen.</p>
             )}
