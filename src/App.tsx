@@ -72,26 +72,30 @@ export function App() {
     <div className="app-shell">
       <main className="home-main">
         <header className="home-hero">
-          <svg className="home-doodle" viewBox="0 0 48 48" aria-hidden="true">
-            <path
-              d="M24 4 L28 16 L40 10 L32 22 L46 24 L32 26 L40 38 L28 32 L24 44 L20 32 L8 38 L16 26 L2 24 L16 22 L8 10 L20 16 Z"
-              fill="#ffe14a"
-              stroke="#111"
-              strokeWidth="2.4"
-              strokeLinejoin="round"
-            />
-          </svg>
-          <h1 className="brand">BEAT</h1>
+          <div className="home-lockup">
+            <h1 className="brand">Egg</h1>
+            <svg className="home-egg" viewBox="0 0 120 150" aria-hidden="true">
+              <ellipse cx="60" cy="138" rx="34" ry="7" fill="#d4d1d6" />
+              <path
+                d="M60 8 C86 8 108 52 108 92 C108 124 86 142 60 142 C34 142 12 124 12 92 C12 52 34 8 60 8 Z"
+                fill="#f6c7d4"
+                stroke="#111"
+                strokeWidth="4"
+                strokeLinejoin="round"
+              />
+              <ellipse cx="46" cy="52" rx="16" ry="22" fill="#fff" opacity="0.38" />
+            </svg>
+          </div>
           <p className="home-lede">3 HP, 2 Moves, 1 Beat</p>
         </header>
 
         {screen === 'home' && (
           <section className="home-actions">
             <button type="button" className="btn btn-primary" onClick={() => setScreen('create')}>
-              Open a room
+              Make a nest
             </button>
             <button type="button" className="btn btn-secondary" onClick={() => setScreen('join')}>
-              Hop in
+              Join
             </button>
           </section>
         )}
@@ -99,22 +103,22 @@ export function App() {
         {screen === 'create' && (
           <section className="panel home-panel">
             <form className="home-form" onSubmit={handleCreate}>
-              <label htmlFor="create-name">Your name</label>
+              <label htmlFor="create-name">Your egg name</label>
               <input
                 id="create-name"
                 value={playerName}
                 onChange={(event) => setPlayerName(event.target.value)}
-                placeholder="Who’s playing?"
+                placeholder="Who’s hatching?"
                 autoComplete="nickname"
                 maxLength={20}
                 required
               />
               <div className="form-actions">
                 <button type="button" className="btn btn-ghost" onClick={() => setScreen('home')}>
-                  Back
+                  Roll back
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={isConnecting}>
-                  {isConnecting ? 'Opening room…' : 'Let’s go'}
+                  {isConnecting ? 'Building the nest…' : 'Crack on'}
                 </button>
               </div>
             </form>
@@ -124,32 +128,32 @@ export function App() {
         {screen === 'join' && (
           <section className="panel home-panel">
             <form className="home-form" onSubmit={handleJoin}>
-              <label htmlFor="join-code">Room code</label>
+              <label htmlFor="join-code">Nest code</label>
               <input
                 id="join-code"
                 value={joinCode}
                 onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
-                placeholder="6-letter code"
+                placeholder="6-letter nest code"
                 autoComplete="off"
                 maxLength={6}
                 required
               />
-              <label htmlFor="join-name">Your name</label>
+              <label htmlFor="join-name">Your egg name</label>
               <input
                 id="join-name"
                 value={playerName}
                 onChange={(event) => setPlayerName(event.target.value)}
-                placeholder="Who’s playing?"
+                placeholder="Who’s hatching?"
                 autoComplete="nickname"
                 maxLength={20}
                 required
               />
               <div className="form-actions">
                 <button type="button" className="btn btn-ghost" onClick={() => setScreen('home')}>
-                  Back
+                  Roll back
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={isConnecting}>
-                  {isConnecting ? 'Linking up…' : 'Let’s go'}
+                  {isConnecting ? 'Rolling in…' : 'Crack on'}
                 </button>
               </div>
             </form>

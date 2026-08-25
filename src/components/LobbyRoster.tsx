@@ -1,4 +1,5 @@
 import { MAX_PLAYERS } from '../types/game';
+import { PlayerToken } from './PlayerToken';
 
 interface LobbyRosterProps {
   connectedCount: number;
@@ -11,6 +12,7 @@ interface LobbyRosterProps {
     isBot: boolean;
     isHost: boolean;
     isYou: boolean;
+    joinOrder: number;
   }>;
 }
 
@@ -25,35 +27,38 @@ export function LobbyRoster({
   return (
     <div className="roster">
       <div className="roster-meta">
-        <span>{connectedCount} in the room</span>
-        <span>{MAX_PLAYERS - connectedCount} seats open</span>
+        <span>{connectedCount} in the carton</span>
+        <span>{MAX_PLAYERS - connectedCount} cups open</span>
       </div>
       <ul className="roster-list">
         {seats.map((player, index) => (
           <li key={player?.id ?? `empty-${index}`} className="roster-seat">
             {player ? (
               <>
+                <span className="seat-egg" aria-hidden="true">
+                  <PlayerToken joinOrder={player.joinOrder} name={player.name} isYou={player.isYou} />
+                </span>
                 <span className="seat-name">
                   {player.name}
                   {player.isYou ? ' (you)' : ''}
                 </span>
                 <span className="seat-tags">
-                  {player.isHost && <span className="tag">host</span>}
+                  {player.isHost && <span className="tag">hen</span>}
                   {player.isBot && <span className="tag tag-muted">bot</span>}
-                  {!player.connected && <span className="tag tag-muted">away</span>}
+                  {!player.connected && <span className="tag tag-muted">rolled off</span>}
                   {canManageBots && player.isBot && (
                     <button
                       type="button"
                       className="seat-remove"
                       onClick={() => onRemoveBot(player.id)}
                     >
-                      Kick
+                      Un-nest
                     </button>
                   )}
                 </span>
               </>
             ) : (
-              <span className="seat-empty">Open seat</span>
+              <span className="seat-empty">Empty cup</span>
             )}
           </li>
         ))}

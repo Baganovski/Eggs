@@ -18,7 +18,7 @@ cannot run usefully on Cursor Cloud / web agents.
 ## Steps
 
 Run from the project root
-(`c:\Users\joeal\Documents\Development\Apps\RandomGame`).
+(`c:\Users\joeal\Documents\Development\Apps\Eggs`).
 
 1. **Build** so the phone gets current code:
    ```

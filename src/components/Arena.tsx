@@ -166,11 +166,45 @@ function applyEvent(tokens: Token[], event: PlaybackEvent): Token[] {
   }
 }
 
+const EGG_WHITE_PATHS = [
+  'M16 48 C14 28 28 18 40 22 C50 12 66 18 70 32 C84 38 78 58 64 62 C50 74 22 70 16 48 Z',
+  'M22 50 C12 40 16 22 32 18 C48 8 72 22 70 40 C80 54 64 70 46 66 C28 74 16 64 22 50 Z',
+  'M18 40 C14 22 36 10 56 18 C76 24 78 50 60 58 C40 70 16 62 18 40 Z',
+  'M20 36 C12 20 32 8 52 16 C74 20 78 48 58 58 C36 70 14 58 20 36 Z',
+];
+
+function EggWhiteBlob({ index }: { index: number }) {
+  const x = 18 + ((index * 29) % 40);
+  const y = 24 + ((index * 17) % 36);
+  const tilt = ((index * 37) % 21) - 10;
+  return (
+    <span
+      className="egg-white-blob"
+      style={{ left: `${x}%`, top: `${y}%`, transform: `rotate(${tilt}deg)` }}
+      aria-hidden="true"
+    >
+      <svg viewBox="0 0 90 80">
+        <path
+          d={EGG_WHITE_PATHS[index % EGG_WHITE_PATHS.length]}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="18"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        <path d={EGG_WHITE_PATHS[index % EGG_WHITE_PATHS.length]} fill="#fffdf8" />
+      </svg>
+    </span>
+  );
+}
+
 async function runPlayback(options: {
   timeline: PlaybackEvent[];
   startTokens: Token[];
+  startStains: Cell[];
   cancelled: () => boolean;
   setTokens: (tokens: Token[]) => void;
+  setStains: (stains: Cell[]) => void;
   setBeams: (beams: Beam[]) => void;
   setBumps: (bumps: Record<string, TokenBump>) => void;
   setFlashIds: (ids: string[]) => void;
@@ -178,6 +212,7 @@ async function runPlayback(options: {
   setStatus: (status: string) => void;
 }): Promise<void> {
   let current = options.startTokens;
+  let stains = options.startStains;
   let actionIndex = 0;
   for (const frame of groupTimeline(options.timeline)) {
     if (options.cancelled()) return;
@@ -212,8 +247,13 @@ async function runPlayback(options: {
     }
 
     const blocked = frame.flatMap((event) => (event.type === 'blocked' ? [event] : []));
+    const freshStains = frame.flatMap((event) => (event.type === 'eggStain' ? [event.cell] : []));
     current = frame.reduce(applyEvent, current);
     options.setTokens(current);
+    if (freshStains.length > 0) {
+      stains = [...stains, ...freshStains];
+      options.setStains(stains);
+    }
 
     if (blocked.length > 0) {
       const names = blocked.map((event) => {
@@ -274,6 +314,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
   const [slot, setSlot] = useState<0 | 1>(0);
   const [localLocked, setLocalLocked] = useState(false);
   const [tokens, setTokens] = useState<Token[]>(() => tokensFromState(state));
+  const [stains, setStains] = useState<Cell[]>(() => state.eggStains ?? []);
   const [beams, setBeams] = useState<Beam[]>([]);
   const [bumps, setBumps] = useState<Record<string, TokenBump>>({});
   const [flashIds, setFlashIds] = useState<string[]>([]);
@@ -297,13 +338,14 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     if (state.turnPhase === 'resolving' && state.timeline.length > 0) return;
     if (watchingLast) return;
     setTokens(tokensFromState(state));
+    setStains(state.eggStains ?? []);
     setBeams([]);
     setBumps({});
     setFlashIds([]);
     setShootingIds([]);
     setReplayDone(true);
     setStatus('');
-  }, [state.players, state.turnPhase, state.timeline.length, watchingLast]);
+  }, [state.players, state.turnPhase, state.timeline.length, state.eggStains, watchingLast]);
 
   const playbackKey = `${state.round}:${state.turnPhase}:${JSON.stringify(state.timeline)}`;
 
@@ -320,6 +362,8 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     setWatchingLast(false);
     setReplayDone(false);
     setTokens(tokensFromSnapshot(state, state.roundStart));
+    const startStains = state.lastReplay?.startEggStains ?? [];
+    setStains(startStains);
     setBeams([]);
     setBumps({});
     setFlashIds([]);
@@ -329,8 +373,10 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
       await runPlayback({
         timeline: state.timeline,
         startTokens: tokensFromSnapshot(state, state.roundStart),
+        startStains,
         cancelled: () => cancelled,
         setTokens,
+        setStains,
         setBeams,
         setBumps,
         setFlashIds,
@@ -339,6 +385,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
       });
       if (cancelled) return;
       setTokens(tokensFromState(state));
+      setStains(state.eggStains ?? []);
       setBeams([]);
       setBumps({});
       setFlashIds([]);
@@ -616,13 +663,17 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     setFlashIds([]);
     setShootingIds([]);
     const startTokens = tokensFromSnapshot(state, replay.roundStart);
+    const startStains = replay.startEggStains ?? [];
     setTokens(startTokens);
+    setStains(startStains);
     void (async () => {
       await runPlayback({
         timeline: replay.timeline,
         startTokens,
+        startStains,
         cancelled: () => watchGen.current !== gen,
         setTokens,
+        setStains,
         setBeams,
         setBumps,
         setFlashIds,
@@ -631,6 +682,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
       });
       if (watchGen.current !== gen) return;
       setTokens(tokensFromState(state));
+      setStains(state.eggStains ?? []);
       setBeams([]);
       setBumps({});
       setFlashIds([]);
@@ -652,13 +704,13 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     !watchingLast;
 
   const plannerHint = !localAlive
-    ? 'You’re out. Watch the rest of the grid.'
+    ? 'You’re scrambled. Watch the rest of the carton.'
     : local?.planSubmitted || localLocked
-      ? 'Locked. Waiting on the rest.'
+      ? 'Egged. Waiting on the rest of the carton.'
       : watchingLast
-        ? status || 'Watching the last round…'
+        ? status || 'Watching the last scramble…'
         : !planning
-          ? status || 'Watching the grid…'
+          ? status || 'Watching the carton…'
           : selectedCard?.kind === 'move'
             ? 'Tap yourself to sit, then up to 2 squares to walk this move. Sit locks only if you open the next move or lock in. Walls block movement and shots.'
             : selectedCard?.kind === 'knife'
@@ -678,17 +730,17 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
       <div className="arena-status-row">
         <p className="arena-kicker">
           {state.phase === 'finished'
-            ? 'That’s a wrap'
+            ? 'All scrambled'
             : planning
               ? `Round ${state.round}`
-              : `Round ${state.round} · playing out`}
+              : `Round ${state.round} · cracking`}
         </p>
         <p className="arena-meta-inline">
           {watchingLast
             ? status || `Watching round ${state.lastReplay?.round ?? ''}`
             : planning
-              ? `${submittedCount}/${livingCount} locked`
-              : status || (replayDone ? 'Moves played out' : 'Watching the grid…')}
+              ? `${submittedCount}/${livingCount} egged`
+              : status || (replayDone ? 'Moves played out' : 'Watching the carton…')}
         </p>
       </div>
 
@@ -715,14 +767,18 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             </span>
             <span className="arena-hud-note">
               {shootingIds.includes(player.id)
-                ? 'shooting'
+                ? 'cracking'
                 : !player.connected
-                  ? 'away'
+                  ? 'rolled off'
+                : player.hp <= 0
+                  ? 'fried'
                   : planning && (player.planSubmitted || (player.isYou && localLocked))
-                    ? 'locked'
-                    : player.isBot
-                      ? 'bot'
-                      : ''}
+                    ? 'egged'
+                    : planning
+                      ? 'thinking'
+                      : player.isBot
+                        ? 'bot'
+                        : ''}
             </span>
           </li>
         ))}
@@ -744,6 +800,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             const occupants = tokens
               .filter((token) => token.row === row && token.col === col)
               .sort((a, b) => a.hp - b.hp);
+            const cellStains = stains.filter((stain) => stain.row === row && stain.col === col);
             const beam = beams.find((ray) => onRay(ray.from, ray.end, cell));
             const beamShooter = beam
               ? tokens.find((token) => token.id === beam.shooterId)
@@ -763,15 +820,21 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                   hasBlock ? ' has-block' : ''
                 }`}
                 style={
-                  beamShooter
-                    ? ({ '--beam': playerColor(beamShooter.joinOrder) } as React.CSSProperties)
-                    : undefined
+                  {
+                    '--cell-row': row,
+                    ...(beamShooter
+                      ? { '--beam': playerColor(beamShooter.joinOrder) }
+                      : {}),
+                  } as React.CSSProperties
                 }
                 onClick={() => handleCellClick(cell)}
                 disabled={!canPlan}
               >
                 {pathIndex > 0 && <span className="path-index">{pathIndex}</span>}
                 {hasBlock && <BlockMark />}
+                {cellStains.map((_, stainIndex) => (
+                  <EggWhiteBlob key={`stain-${stainIndex}`} index={stainIndex} />
+                ))}
                 {occupants.map((token) => (
                   <PlayerToken
                     key={token.id}
@@ -782,6 +845,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                     isHit={flashIds.includes(token.id)}
                     isShooting={shootingIds.includes(token.id)}
                     bump={bumps[token.id]}
+                    tiltSeed={`${token.id}:${token.row}:${token.col}`}
                   />
                 ))}
               </button>
@@ -841,7 +905,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                 disabled={!canPlan}
                 onClick={resetAction}
               >
-                Reset
+                Re-lay
               </button>
               <button
                 type="button"
@@ -849,7 +913,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                 disabled={!canReplayLast}
                 onClick={watchLastTurn}
               >
-                Replay
+                Rewatch
               </button>
             </div>
             <button
@@ -858,7 +922,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
               disabled={!canPlan || !legalPlan}
               onClick={lockIn}
             >
-              Lock it in
+              Egg
             </button>
           </div>
         </div>
@@ -868,13 +932,13 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         <div className="arena-outcome">
           <p className="arena-kicker">
             {state.outcome.kind === 'winner'
-              ? `${winner?.name ?? 'Someone'} called it`
-              : 'Dead heat'}
+              ? `${winner?.name ?? 'Someone'} hatched it`
+              : 'Double yolk'}
           </p>
           <p className="arena-copy">
             {state.outcome.kind === 'winner'
-              ? `${winner?.hp ?? 0} HP still on the board.`
-              : 'Last survivors dropped on the same beat.'}
+              ? `${winner?.hp ?? 0} shells still intact.`
+              : 'Last eggs cracked on the same beat.'}
           </p>
         </div>
       )}
@@ -887,10 +951,10 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             disabled={!canReplayLast}
             onClick={watchLastTurn}
           >
-            Replay
+            Rewatch
           </button>
           <button type="button" className="btn btn-primary" onClick={onReturnToLobby}>
-            Back to the room
+            That&apos;s Egg
           </button>
         </div>
       )}
@@ -903,9 +967,9 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             disabled={!canReplayLast}
             onClick={watchLastTurn}
           >
-            Replay
+            Rewatch
           </button>
-          <p className="arena-copy">Host is sending everyone back to the room.</p>
+          <p className="arena-copy">The hen is calling everyone back to the nest.</p>
         </div>
       )}
     </div>
@@ -916,16 +980,36 @@ function BlockMark() {
   return (
     <span className="arena-block" aria-hidden="true">
       <svg viewBox="0 0 32 32">
-        <rect x="2" y="2" width="28" height="28" rx="3" fill="#7a756f" stroke="#111" strokeWidth="2.4" />
         <path
-          d="M2 11 H30 M2 20 H30 M11 2 V11 M22 11 V20 M11 20 V30 M22 2 V11"
+          d="M8.2 18.6 C5.4 16.1 5.8 10.4 9.6 7.8 C12.2 6 15.1 5.4 18.4 6.2 C22.8 7.3 26.4 10.8 25.9 15.1 C25.6 18.4 23.8 21.2 20.6 23 C16.8 25.1 11.8 24.2 8.8 21.4 C7.8 20.5 8.2 19.4 8.2 18.6 Z"
+          fill="#8b8174"
+          stroke="#111"
+          strokeWidth="2.2"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M10.4 11.2 C12.6 8.6 16.8 8.1 19.6 10.4 C20.4 11.1 19.2 12.2 18.1 11.6 C16 10.4 13.4 10.8 11.6 12.4 C10.8 13.1 9.8 12.1 10.4 11.2 Z"
+          fill="#c4b9ab"
+          opacity="0.55"
+        />
+        <path
+          d="M12.2 16.8 C13.1 15.4 15.4 15.8 15.8 17.4 C16.1 18.4 14.8 19.1 14 18.4 C13.2 17.8 12.6 17.6 12.2 16.8 Z"
+          fill="#6f675c"
+          opacity="0.45"
+        />
+        <path
+          d="M19.8 17.2 C21.4 16.4 22.8 17.8 21.6 19.2 C20.8 20.1 19.2 19.6 19.8 17.2 Z"
+          fill="#6f675c"
+          opacity="0.35"
+        />
+        <path
+          d="M13.6 20.2 C14.8 19.8 16.4 20.6 16.1 21.8"
           fill="none"
           stroke="#111"
-          strokeWidth="1.6"
+          strokeWidth="1.1"
+          strokeLinecap="round"
+          opacity="0.35"
         />
-        <rect x="4" y="4" width="6" height="6" rx="1" fill="#959089" />
-        <rect x="13" y="13" width="6" height="6" rx="1" fill="#959089" />
-        <rect x="22" y="22" width="6" height="6" rx="1" fill="#959089" />
       </svg>
     </span>
   );

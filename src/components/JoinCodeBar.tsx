@@ -16,13 +16,13 @@ export function JoinCodeBar({ code, onLeave }: JoinCodeBarProps) {
     <header className="join-code-wrap">
       <div className="join-code-bar">
         <div className="join-code-copy">
-          <span className="join-code-label">Room code</span>
+          <span className="join-code-label">Nest code</span>
           <button type="button" className="join-code-value" onClick={copyCode}>
             {code}
           </button>
         </div>
         <button type="button" className="btn btn-ghost" onClick={onLeave}>
-          Leave
+          Fly the nest
         </button>
       </div>
     </header>

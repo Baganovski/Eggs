@@ -28,7 +28,7 @@ export type PlanCard =
   | { id: string; kind: 'move' }
   | { id: string; kind: WeaponKind };
 
-export const PLAYER_HUES = ['#e23b3b', '#3b6cf0', '#3cbf4a', '#ffe14a'] as const;
+export const PLAYER_HUES = ['#f6c7d4', '#c5e4ea', '#d4ead0', '#f6e7b4'] as const;
 
 export type GamePhase = 'lobby' | 'playing' | 'finished';
 export type TurnPhase = 'planning' | 'resolving';
@@ -65,6 +65,7 @@ export type PlaybackEvent =
   | { type: 'hit'; playerId: string; hpAfter: number }
   | { type: 'death'; playerId: string }
   | { type: 'move'; playerId: string; from: Cell; to: Cell }
+  | { type: 'eggStain'; cell: Cell }
   | { type: 'blocked'; playerId: string; from: Cell; attempted: Cell };
 
 export interface RoundStartToken {
@@ -78,6 +79,7 @@ export interface LastReplay {
   round: number;
   timeline: PlaybackEvent[];
   roundStart: RoundStartToken[];
+  startEggStains: Cell[];
 }
 
 export interface Player {
@@ -103,6 +105,7 @@ export interface GameState {
   roundStart: RoundStartToken[] | null;
   lastReplay: LastReplay | null;
   mapObjects: Cell[];
+  eggStains: Cell[];
   players: Player[];
   hostPlayerId: string;
   localPlayerId: string;

@@ -26,7 +26,7 @@ cannot run usefully on Cursor Cloud / web agents.
 ## Steps
 
 Run from the project root
-(`c:\Users\joeal\Documents\Development\Apps\RandomGame`).
+(`c:\Users\joeal\Documents\Development\Apps\Eggs`).
 
 1. **Warn and confirm before wiping**, unless the user has already explicitly
    confirmed the wipe in this same request. State plainly that clearing site

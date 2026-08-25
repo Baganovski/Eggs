@@ -118,7 +118,7 @@ export class RoomSession {
     if (this.state.phase !== 'lobby') return;
     const activeCount = this.state.players.filter((player) => player.connected).length;
     if (activeCount >= MAX_PLAYERS) {
-      this.emitError('This room is full.');
+      this.emitError('This nest is full.');
       return;
     }
     const bot = createBotPlayer(
@@ -237,7 +237,12 @@ export class RoomSession {
       return;
     }
 
-    const result = resolveRound(this.state.players, this.pendingPlans, this.state.mapObjects);
+    const result = resolveRound(
+      this.state.players,
+      this.pendingPlans,
+      this.state.mapObjects,
+      this.state.eggStains ?? [],
+    );
     this.pendingPlans.clear();
     this.state = applyResolvedRound(this.state, result);
     this.syncState();
@@ -264,7 +269,7 @@ export class RoomSession {
 
     const plan = parseAndValidatePlan(player, action.actions, action.cardIds, this.state.mapObjects);
     if (!plan) {
-      this.rejectPlan(playerId, 'That plan is not legal.');
+      this.rejectPlan(playerId, 'That scramble is not legal.');
       return;
     }
 
@@ -386,7 +391,7 @@ export class RoomSession {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         cleanup();
-        reject(new Error('Could not reach the host. Try rejoining the room.'));
+        reject(new Error('Could not reach the hen. Try rolling back into the nest.'));
       }, timeoutMs);
 
       const cleanup = () => {
@@ -476,7 +481,7 @@ export class RoomSession {
       case 'playerLeft':
         this.updateState({ players: message.players });
         if (this.state.phase !== 'lobby') {
-          this.emitNotice('A player left the match.');
+          this.emitNotice('An egg left the scramble.');
         }
         break;
       case 'hostHandoff':
@@ -503,7 +508,7 @@ export class RoomSession {
       (player) => player.connected && player.name.toLowerCase() === name.toLowerCase(),
     );
     if (duplicateName) {
-      this.send({ type: 'error', message: 'That name is already taken.' }, connection);
+      this.send({ type: 'error', message: 'That egg name is already taken.' }, connection);
       connection.close();
       return;
     }
@@ -523,12 +528,12 @@ export class RoomSession {
       );
     } else {
       if (activeCount >= MAX_PLAYERS) {
-        this.send({ type: 'error', message: 'This room is full.' }, connection);
+        this.send({ type: 'error', message: 'This nest is full.' }, connection);
         connection.close();
         return;
       }
       if (this.state.phase !== 'lobby') {
-        this.send({ type: 'error', message: 'This game has already started.' }, connection);
+        this.send({ type: 'error', message: 'This scramble has already started.' }, connection);
         connection.close();
         return;
       }
@@ -559,7 +564,7 @@ export class RoomSession {
     if (startedBy !== this.state.hostPlayerId) {
       this.broadcast({
         type: 'notice',
-        message: 'Only the host can start the match.',
+        message: 'Only the hen can start the scramble.',
       });
       return;
     }
@@ -567,7 +572,7 @@ export class RoomSession {
     if (connectedCount < MIN_PLAYERS) {
       this.broadcast({
         type: 'notice',
-        message: `Need at least ${MIN_PLAYERS} players to start (${connectedCount}/${MAX_PLAYERS}).`,
+        message: `Need at least ${MIN_PLAYERS} eggs to scramble (${connectedCount}/${MAX_PLAYERS}).`,
       });
       return;
     }
@@ -631,7 +636,7 @@ export class RoomSession {
       );
     }
     if (this.state.phase !== 'lobby') {
-      this.emitNotice(`${player.name} left the match.`);
+      this.emitNotice(`${player.name} left the scramble.`);
     }
     this.emitState();
     this.tryResolveIfReady();
@@ -652,14 +657,14 @@ export class RoomSession {
 
     const remaining = this.state.players.filter((player) => player.connected && !player.isBot);
     if (remaining.length === 0) {
-      this.emitError('Everyone left the room.');
+      this.emitError('Everyone flew the nest.');
       this.destroy();
       return;
     }
 
     const newHostId = electHost(this.state.players);
     if (!newHostId) {
-      this.emitError('Could not elect a new host.');
+      this.emitError('Could not elect a new hen.');
       this.destroy();
       return;
     }
@@ -671,7 +676,7 @@ export class RoomSession {
         await this.promoteToHost();
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : 'Failed to take over as host.';
+          error instanceof Error ? error.message : 'Failed to take over as hen.';
         this.emitError(message);
         this.migrationInProgress = false;
         return;
@@ -684,7 +689,7 @@ export class RoomSession {
   }
 
   private async promoteToHost(): Promise<void> {
-    this.emitNotice('You are now hosting.');
+    this.emitNotice('You are now the hen.');
     this.clearPlaybackTimer();
     this.clearBotTimers();
     this.pendingPlans.clear();
@@ -716,7 +721,7 @@ export class RoomSession {
   }
 
   private async reconnectToHost(): Promise<void> {
-    this.emitNotice('Host changed. Reconnecting...');
+    this.emitNotice('The hen changed. Reconnecting…');
     for (const connection of this.connections.values()) {
       connection.close();
     }
@@ -763,7 +768,7 @@ export class RoomSession {
     const message =
       lastError instanceof Error
         ? lastError.message
-        : 'Reconnection failed. Try rejoining the room.';
+        : 'Reconnection failed. Try rolling back into the nest.';
     this.emitError(message);
   }
 
@@ -771,7 +776,7 @@ export class RoomSession {
     this.state = withLocalId(message.state, this.state.localPlayerId);
     this.state.hostPlayerId = message.newHostPlayerId;
     this.isHost = message.newHostPlayerId === this.state.localPlayerId;
-    this.emitNotice('New host connected. Game continues.');
+    this.emitNotice('New hen connected. The scramble continues.');
     this.emitState();
   }
 }
