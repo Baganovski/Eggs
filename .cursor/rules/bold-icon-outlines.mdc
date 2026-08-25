@@ -1,0 +1,15 @@
+---
+description: Prefer thick black outlines on icons and UI marks
+alwaysApply: true
+---
+
+# Bold icon outlines
+
+When drawing or editing SVG icons, tokens, and UI marks in this project:
+
+- Use a **thick black outline** (`#111` / `var(--ink)`) — err on the side of too bold, not too thin.
+- Typical stacked-stroke pattern in a 32×32 viewBox: outer outline ~9–11, inner fill stroke ~4–5 (roughly half the outer weight).
+- Keep `strokeLinecap="round"` and `strokeLinejoin="round"` for chunky, friendly shapes.
+- Floating marks use `filter: drop-shadow(4px 4px 0 #111)` (or `var(--shadow)` on containers).
+
+If the user asks for a bigger outline, increase the outer stroke first, then nudge the inner stroke up to keep a visible ink rim.

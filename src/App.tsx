@@ -117,6 +117,7 @@ export function App() {
               Hatch in
             </button>
             <Eggsplanation />
+            <p className="home-version">v{__APP_VERSION__}</p>
           </section>
         )}
 

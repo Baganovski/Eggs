@@ -3,7 +3,7 @@ export const MAX_PLAYERS = 4;
 export const BOARD_SIZE = 7;
 export const STARTING_HP = 3;
 export const MAX_WALK_STEPS = 3;
-export const PLAN_TIME_MS = 20_000;
+export const PLAN_TIME_MS = 30_000;
 export const PLAN_DEADLINE_GRACE_MS = 750;
 
 export const DIRECTIONS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;

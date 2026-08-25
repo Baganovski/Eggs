@@ -61,6 +61,10 @@ export function formatWeapon(kind: WeaponKind): string {
   return kind[0].toUpperCase() + kind.slice(1);
 }
 
+export function isReusableCard(card: PlanCard): boolean {
+  return card.kind === 'move' || card.kind === 'pistol';
+}
+
 export function randomPickupWeapon(): WeaponKind {
   const index = Math.floor(Math.random() * PICKUP_WEAPON_KINDS.length);
   return PICKUP_WEAPON_KINDS[index] ?? 'rifle';
@@ -357,7 +361,7 @@ export function parseAndValidatePlan(
   const firstCard = player.hand.find((card) => card.id === firstId);
   const secondCard = player.hand.find((card) => card.id === secondId);
   if (!firstCard || !secondCard) return null;
-  if (firstId === secondId && firstCard.kind !== 'move') return null;
+  if (firstId === secondId && !isReusableCard(firstCard)) return null;
 
   const first = parseAction(actions[0]);
   const second = parseAction(actions[1]);

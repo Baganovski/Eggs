@@ -12,6 +12,7 @@ import {
   isAlive,
   isCardinalWeapon,
   isObjectCell,
+  isReusableCard,
   isOnBoard,
   neighbors8,
   plannedPositionAfter,
@@ -153,7 +154,9 @@ export function chooseBotPlan(
 
   const pickSlot = (from: Cell, usedActionId: string | null): { cardId: string; action: ArenaAction } => {
     const enemy = nearestEnemy(from, players, bot.id);
-    const unused = actionCards.filter((card) => card.id !== usedActionId);
+    const unused = actionCards.filter(
+      (card) => card.id !== usedActionId || isReusableCard(card),
+    );
     if (enemy) {
       for (const card of unused) {
         const shot = actionForWeapon(from, card.kind, players, bot.id, mapObjects);

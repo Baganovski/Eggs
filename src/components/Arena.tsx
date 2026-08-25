@@ -26,6 +26,7 @@ import {
   isCardinalWeapon,
   isObjectCell,
   isOnBoard,
+  isReusableCard,
   neighbors8,
   parseAndValidatePlan,
   plannedPositionAfter,
@@ -124,6 +125,9 @@ function shotCaption(tokens: Token[], frame: PlaybackEvent[], actionIndex: numbe
 }
 
 const WALK_STEPS_AFTER_SIT = 2;
+
+const PLANNER_HINT_WALK =
+  'Tap yourself to sit, then up to 2 squares to walk this move. Sit locks only if you open the next move or lock in. Walk onto a present to unwrap a spare weapon.';
 
 function planBeatNumbers(
   start: Cell,
@@ -305,9 +309,29 @@ async function runPlayback(options: {
   }
 }
 
-function PlanTimerBar({ deadlineAt }: { deadlineAt: number }) {
-  const remaining = Math.max(0, deadlineAt - Date.now());
-  const startScale = Math.min(1, remaining / PLAN_TIME_MS);
+function PlanTimerFill({ deadlineAt }: { deadlineAt: number }) {
+  const [anim] = useState(() => {
+    const remaining = Math.max(0, deadlineAt - Date.now());
+    return {
+      remaining,
+      startScale: Math.min(1, remaining / PLAN_TIME_MS),
+    };
+  });
+  return (
+    <div
+      className="arena-timer-fill"
+      style={
+        {
+          '--timer-start': `${anim.startScale * 100}%`,
+          animationDuration: `${anim.remaining}ms`,
+        } as React.CSSProperties
+      }
+    />
+  );
+}
+
+function PlanTimerBar({ deadlineAt }: { deadlineAt: number | null }) {
+  const remaining = deadlineAt ? Math.max(0, deadlineAt - Date.now()) : 0;
   return (
     <div
       className="arena-timer"
@@ -317,16 +341,7 @@ function PlanTimerBar({ deadlineAt }: { deadlineAt: number }) {
       aria-valuemax={PLAN_TIME_MS / 1000}
       aria-valuenow={Math.ceil(remaining / 1000)}
     >
-      <div
-        key={deadlineAt}
-        className="arena-timer-fill"
-        style={
-          {
-            '--timer-start': `${startScale * 100}%`,
-            animationDuration: `${remaining}ms`,
-          } as React.CSSProperties
-        }
-      />
+      {deadlineAt ? <PlanTimerFill key={deadlineAt} deadlineAt={deadlineAt} /> : null}
     </div>
   );
 }
@@ -600,7 +615,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
   const chooseCard = (card: PlanCard) => {
     if (!canPlan) return;
     const other = slot === 0 ? 1 : 0;
-    if (card.kind !== 'move' && slotCards[other] === card.id) return;
+    if (!isReusableCard(card) && slotCards[other] === card.id) return;
 
     const current = draft[slot];
     const slotFilled = current !== null || pendingSit[slot];
@@ -775,7 +790,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         : !planning
           ? status || 'Watching the carton…'
           : selectedCard?.kind === 'move'
-            ? 'Tap yourself to sit, then up to 2 squares to walk this move. Sit locks only if you open the next move or lock in. Walk onto a present to unwrap a spare weapon.'
+            ? PLANNER_HINT_WALK
             : selectedCard?.kind === 'slap'
               ? 'Tap north, east, south, or west. The slap hits the three squares in that facing. Two damage.'
               : selectedCard?.kind === 'flamethrower'
@@ -788,7 +803,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                       ? 'Tap a cell on the line you want. Unlimited range, two damage.'
                       : selectedCard?.kind === 'pistol'
                         ? 'Tap a cell on the line, up to 3 squares. One damage. Unlimited ammo.'
-                        : 'Pick Move, Pistol, or your spare. Walk onto a present to fill the spare slot.';
+                        : 'Pick Walk, Action, or your spare. Walk onto a present to fill the spare slot.';
 
   const showPlanner = state.phase === 'playing';
 
@@ -796,11 +811,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     <div className="arena">
       <div className="arena-status-row">
         <p className="arena-kicker">
-          {state.phase === 'finished'
-            ? 'All scrambled'
-            : planning
-              ? `Round ${state.round}`
-              : `Round ${state.round} · cracking`}
+          {state.phase === 'finished' ? 'All scrambled' : `Round ${state.round}`}
         </p>
         <p className="arena-meta-inline">
           {watchingLast
@@ -851,9 +862,11 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         ))}
       </ul>
 
-      <div className="arena-board-wrap">
-        {planning && state.planDeadlineAt ? <PlanTimerBar deadlineAt={state.planDeadlineAt} /> : null}
-        <div className="arena-board" style={{ gridTemplateColumns: `repeat(${BOARD_SIZE}, 1fr)` }}>
+      <div className="arena-stage">
+        <PlanTimerBar deadlineAt={planning ? state.planDeadlineAt : null} />
+        <div className="arena-board-slot">
+          <div className="arena-board-wrap">
+            <div className="arena-board" style={{ gridTemplateColumns: `repeat(${BOARD_SIZE}, 1fr)` }}>
           {Array.from({ length: BOARD_SIZE * BOARD_SIZE }, (_, index) => {
             const row = Math.floor(index / BOARD_SIZE);
             const col = index % BOARD_SIZE;
@@ -921,6 +934,8 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
               </button>
             );
           })}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -949,7 +964,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                   : slotKind === 'pistol'
                     ? local?.hand.find((entry) => entry.kind === 'pistol')
                     : local?.hand.find((entry) => entry.kind !== 'move' && entry.kind !== 'pistol');
-              const label = slotKind === 'move' ? 'Move' : slotKind === 'pistol' ? 'Pistol' : 'Spare';
+              const label = slotKind === 'move' ? 'Move' : 'Action';
               if (!card) {
                 return (
                   <button
@@ -964,9 +979,9 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                 );
               }
               const other = slot === 0 ? 1 : 0;
-              const usedElsewhere = card.kind !== 'move' && slotCards[other] === card.id;
+              const usedElsewhere = !isReusableCard(card) && slotCards[other] === card.id;
               const selected = slotCards[slot] === card.id;
-              const title = card.kind === 'move' ? 'Move' : formatWeapon(card.kind);
+              const title = card.kind === 'move' ? 'Walk' : formatWeapon(card.kind);
               return (
                 <button
                   key={card.id}
@@ -984,7 +999,12 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             })}
           </div>
 
-          <p className="arena-hint">{plannerHint}</p>
+          <div className="arena-hint-box">
+            <p className="arena-hint is-sizer" aria-hidden="true">
+              {PLANNER_HINT_WALK}
+            </p>
+            <p className="arena-hint">{plannerHint}</p>
+          </div>
 
           <div className="planner-actions">
             <div className="planner-tools">
@@ -1011,7 +1031,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
               disabled={!canPlan || !legalPlan}
               onClick={lockIn}
             >
-              Egg
+              Scramble
             </button>
           </div>
         </div>
@@ -1043,7 +1063,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             Rewatch
           </button>
           <button type="button" className="btn btn-primary" onClick={onReturnToLobby}>
-            That&apos;s Egg
+            That&apos;s Eggs
           </button>
         </div>
       )}
