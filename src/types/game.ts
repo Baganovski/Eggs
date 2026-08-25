@@ -3,6 +3,8 @@ export const MAX_PLAYERS = 4;
 export const BOARD_SIZE = 7;
 export const STARTING_HP = 3;
 export const MAX_WALK_STEPS = 3;
+export const PLAN_TIME_MS = 20_000;
+export const PLAN_DEADLINE_GRACE_MS = 750;
 
 export const DIRECTIONS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
 export type Direction = (typeof DIRECTIONS)[number];
@@ -21,8 +23,10 @@ export const DIR_DELTA: Record<Direction, { dr: number; dc: number }> = {
   NW: { dr: -1, dc: -1 },
 };
 
-export const WEAPON_KINDS = ['pistol', 'shotgun', 'bomb', 'knife'] as const;
+export const WEAPON_KINDS = ['pistol', 'rifle', 'shotgun', 'bomb', 'slap', 'flamethrower'] as const;
 export type WeaponKind = (typeof WEAPON_KINDS)[number];
+export const PICKUP_WEAPON_KINDS = ['rifle', 'shotgun', 'bomb', 'slap', 'flamethrower'] as const;
+export type PickupWeaponKind = (typeof PICKUP_WEAPON_KINDS)[number];
 
 export type PlanCard =
   | { id: string; kind: 'move' }
@@ -66,7 +70,8 @@ export type PlaybackEvent =
   | { type: 'death'; playerId: string }
   | { type: 'move'; playerId: string; from: Cell; to: Cell }
   | { type: 'eggStain'; cell: Cell }
-  | { type: 'blocked'; playerId: string; from: Cell; attempted: Cell };
+  | { type: 'blocked'; playerId: string; from: Cell; attempted: Cell }
+  | { type: 'pickup'; playerId: string; cell: Cell; weapon: WeaponKind };
 
 export interface RoundStartToken {
   id: string;
@@ -80,6 +85,7 @@ export interface LastReplay {
   timeline: PlaybackEvent[];
   roundStart: RoundStartToken[];
   startEggStains: Cell[];
+  startPresents: Cell[];
 }
 
 export interface Player {
@@ -93,6 +99,7 @@ export interface Player {
   row: number;
   col: number;
   hand: PlanCard[];
+  spareWeapon: WeaponKind | null;
 }
 
 export interface GameState {
@@ -106,9 +113,11 @@ export interface GameState {
   lastReplay: LastReplay | null;
   mapObjects: Cell[];
   eggStains: Cell[];
+  presents: Cell[];
   players: Player[];
   hostPlayerId: string;
   localPlayerId: string;
+  planDeadlineAt: number | null;
 }
 
 export type PublicGameState = Omit<GameState, 'localPlayerId'>;

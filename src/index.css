@@ -42,6 +42,7 @@ input {
 
 h1,
 h2,
+h3,
 .brand,
 .join-code-value,
 .arena-kicker,
@@ -85,7 +86,7 @@ h2,
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 280px;
+  width: 320px;
   margin: 0 auto 4px;
 }
 
@@ -101,13 +102,18 @@ h2,
 }
 
 .home-lockup .brand {
-  margin: 0 0 36px;
+  margin: 0 0 4px;
   font-family: 'Titan One', 'Archivo Black', sans-serif;
-  font-size: 108px;
+  font-size: 96px;
   font-weight: 400;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.04em;
   line-height: 0.85;
   transform: rotate(-12deg);
+  color: #f6c7d4;
+  -webkit-text-stroke: 10px #111;
+  paint-order: stroke fill;
+  text-shadow: 3px 5px 0 #111;
+  overflow: visible;
 }
 
 h1,
@@ -138,7 +144,7 @@ h2 {
 }
 
 .home-lede {
-  margin: 18px auto 0;
+  margin: 8px auto 0;
   max-width: 28rem;
   font-size: 1.15rem;
   font-weight: 600;
@@ -158,11 +164,12 @@ h2 {
   display: block;
 }
 
-.home-lockup .home-egg {
-  width: 176px;
+.home-egg-stack {
+  display: block;
+  width: min(300px, 84vw);
   height: auto;
-  margin: 0 0 0 -12px;
-  transform: rotate(10deg);
+  margin: 0 auto;
+  overflow: visible;
 }
 
 .panel {
@@ -243,6 +250,32 @@ h2 {
 .btn-ghost {
   background: transparent;
   box-shadow: none;
+}
+
+.btn-lime {
+  background: var(--lime);
+}
+
+.eggsplanation-open {
+  margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.eggsplanation-i {
+  display: inline-grid;
+  place-items: center;
+  width: 1.2em;
+  height: 1.2em;
+  border: 2.5px solid var(--ink);
+  border-radius: 50%;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 0.82rem;
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .toast-stack {
@@ -503,6 +536,32 @@ h2 {
   letter-spacing: 0.04em;
 }
 
+.arena-timer {
+  width: 100%;
+  margin: 0 0 10px;
+  height: 12px;
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  background: var(--cream);
+  overflow: hidden;
+}
+
+.arena-timer-fill {
+  height: 100%;
+  width: var(--timer-start, 100%);
+  transform-origin: left center;
+  background: var(--orange);
+  animation-name: arena-timer-drain;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes arena-timer-drain {
+  to {
+    width: 0%;
+  }
+}
+
 .arena-hp {
   display: flex;
   gap: 3px;
@@ -611,6 +670,20 @@ h2 {
 }
 
 .arena-block svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  filter: drop-shadow(2px 2px 0 #111);
+}
+
+.arena-present {
+  position: absolute;
+  inset: 12%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.arena-present svg {
   width: 100%;
   height: 100%;
   display: block;
@@ -772,8 +845,17 @@ h2 {
   color: var(--ink);
 }
 
+.plan-card.is-empty,
+.plan-card.is-empty:disabled {
+  border-style: dotted;
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
+  cursor: default;
+}
+
 .plan-card.is-spent,
-.plan-card:disabled {
+.plan-card:disabled:not(.is-empty) {
   opacity: 0.45;
   cursor: not-allowed;
   box-shadow: none;
@@ -890,5 +972,76 @@ h2 {
   font-size: 0.82rem;
   padding: 28px 20px 24px;
   font-weight: 600;
+}
+
+.eggsplanation-dialog {
+  width: min(440px, calc(100% - 32px));
+  max-height: min(88dvh, 640px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.eggsplanation-dialog::backdrop {
+  background: rgba(17, 17, 17, 0.42);
+}
+
+.eggsplanation-panel {
+  max-height: min(88dvh, 640px);
+  overflow: auto;
+}
+
+.eggsplanation-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.eggsplanation-head h2 {
+  margin: 0;
+}
+
+.eggsplanation-close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--ink);
+  border-radius: 50%;
+  background: var(--yellow);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  font-size: 1.35rem;
+  line-height: 1;
+  padding: 0;
+}
+
+.eggsplanation-list {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.eggsplanation-item h3 {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.eggsplanation-item p {
+  margin: 0;
+  line-height: 1.45;
+  font-weight: 600;
+}
+
+.eggsplanation-panel .btn {
+  width: 100%;
 }
 

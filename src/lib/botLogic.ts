@@ -10,12 +10,13 @@ import {
 import {
   directionFromRay,
   isAlive,
+  isCardinalWeapon,
   isObjectCell,
   isOnBoard,
-  knifeFanCells,
   neighbors8,
   plannedPositionAfter,
   shotRayCells,
+  weaponFanCells,
   WEAPON_STATS,
 } from './arenaLogic';
 
@@ -56,10 +57,10 @@ function bestShotForWeapon(
   selfId: string,
   mapObjects: Cell[],
 ): Direction | null {
-  if (weapon === 'knife') {
+  if (isCardinalWeapon(weapon)) {
     for (const dir of CARDINAL_DIRS) {
-      const fan = knifeFanCells(from, dir);
-      if (fan.some((cell) => occupantAtCell(others, cell, selfId))) return dir;
+      const cells = weaponFanCells(weapon, from, dir) ?? [];
+      if (cells.some((cell) => occupantAtCell(others, cell, selfId))) return dir;
     }
     return null;
   }
@@ -136,6 +137,7 @@ export function chooseBotPlan(
   bot: Player,
   players: Player[],
   mapObjects: Cell[],
+  presents: Cell[] = [],
 ): { cardIds: [string, string]; actions: [ArenaAction, ArenaAction] } {
   const moveCard = bot.hand.find((card) => card.kind === 'move');
   const actionCards = bot.hand.filter((card) => card.kind !== 'move');
@@ -143,6 +145,11 @@ export function chooseBotPlan(
   if (!moveCard) {
     return { cardIds: [bot.hand[0]?.id ?? '', bot.hand[1]?.id ?? ''], actions: fallbackStay };
   }
+
+  const nearestPresent = (from: Cell): Cell | null => {
+    if (presents.length === 0) return null;
+    return [...presents].sort((a, b) => chebyshev(from, a) - chebyshev(from, b))[0] ?? null;
+  };
 
   const pickSlot = (from: Cell, usedActionId: string | null): { cardId: string; action: ArenaAction } => {
     const enemy = nearestEnemy(from, players, bot.id);
@@ -154,7 +161,11 @@ export function chooseBotPlan(
           return { cardId: card.id, action: shot };
         }
       }
-      return { cardId: moveCard.id, action: walkToward(from, enemy, players, bot.id, mapObjects) };
+    }
+    const present = !bot.spareWeapon ? nearestPresent(from) : null;
+    const walkTarget = present ?? enemy;
+    if (walkTarget) {
+      return { cardId: moveCard.id, action: walkToward(from, walkTarget, players, bot.id, mapObjects) };
     }
     return { cardId: moveCard.id, action: { type: 'stay' } };
   };
