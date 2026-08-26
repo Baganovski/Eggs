@@ -1,6 +1,9 @@
 import {
   MAX_PLAYERS,
   STARTING_HP,
+  cartonFitsPlayerCount,
+  isCartonType,
+  DEFAULT_CARTON_TYPE,
   type GameState,
   type Player,
   type PlayerAction,
@@ -39,6 +42,7 @@ export function createHostLobbyState(
   return {
     roomCode,
     phase: 'lobby',
+    cartonType: DEFAULT_CARTON_TYPE,
     ...emptyArenaFields(),
     players: [createInitialPlayer(playerId, playerName, 0)],
     hostPlayerId: playerId,
@@ -50,6 +54,7 @@ export function createJoinerLobbyState(roomCode: string, playerId: string): Game
   return {
     roomCode,
     phase: 'lobby',
+    cartonType: DEFAULT_CARTON_TYPE,
     ...emptyArenaFields(),
     players: [],
     hostPlayerId: '',
@@ -114,6 +119,14 @@ export function applyPlayerAction(
   action: PlayerAction,
 ): GameState {
   switch (action.type) {
+    case 'setCartonType': {
+      if (state.phase !== 'lobby' || playerId !== state.hostPlayerId) return state;
+      if (!isCartonType(action.cartonType)) return state;
+      if (action.cartonType === state.cartonType) return state;
+      const occupantCount = state.players.length;
+      if (!cartonFitsPlayerCount(action.cartonType, occupantCount)) return state;
+      return { ...state, cartonType: action.cartonType };
+    }
     case 'endMatch': {
       if (state.phase !== 'playing' || playerId !== state.hostPlayerId) return state;
       return { ...state, phase: 'finished', turnPhase: 'resolving' };

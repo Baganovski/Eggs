@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import {
-  BOARD_SIZE,
+  cartonSpec,
   MAX_WALK_STEPS,
   PLAN_TIME_MS,
   STARTING_HP,
   type ArenaAction,
+  type CartonSpec,
   type Cell,
   type GameState,
   type PlanCard,
@@ -13,6 +14,8 @@ import {
 } from '../types/game';
 import {
   bombSplashCells,
+  bombThrowCells,
+  cellAlongRay,
   cellsEqual,
   completePartialPlan,
   directionFromRay,
@@ -33,6 +36,7 @@ import {
   playerColor,
   shotPlaybackCells,
   shotRayCells,
+  walkDelay,
   weaponFanCells,
   WEAPON_STATS,
 } from '../lib/arenaLogic';
@@ -127,20 +131,25 @@ function shotCaption(tokens: Token[], frame: PlaybackEvent[], actionIndex: numbe
 const WALK_STEPS_AFTER_SIT = 2;
 
 const PLANNER_HINT_WALK =
-  'Tap yourself to sit, then up to 2 squares to walk this move. Sit locks only if you open the next move or lock in. Walk onto a present to unwrap a spare weapon.';
+  'Tap yourself to sit, then up to 2 squares to walk this move. Sitting only spends a beat on this move — the next move can still walk 3. Sit locks if you open the next move or lock in. Walk onto a present to unwrap a spare weapon.';
+
+const PLANNER_HINT_WALK_NO_PRESENT =
+  'Tap yourself to sit, then up to 2 squares to walk this move. Sitting only spends a beat on this move — the next move can still walk 3. Sit locks if you open the next move or lock in.';
+
+function walkAction(path: Cell[], delay = 0): ArenaAction {
+  return delay === 1 ? { type: 'walk', path, delay: 1 } : { type: 'walk', path };
+}
 
 function planBeatNumbers(
   start: Cell,
   actions: [ArenaAction | null, ArenaAction | null],
-  leadSit: [boolean, boolean] = [false, false],
 ): Map<string, number> {
   const numbers = new Map<string, number>();
   let n = 0;
   let pos = start;
-  for (let index = 0; index < actions.length; index += 1) {
-    const action = actions[index];
+  for (const action of actions) {
     if (!action) break;
-    if (action.type === 'stay' || (action.type === 'walk' && leadSit[index])) {
+    if (action.type === 'stay' || (action.type === 'walk' && walkDelay(action))) {
       n += 1;
       numbers.set(`${pos.row},${pos.col}`, n);
     }
@@ -150,8 +159,6 @@ function planBeatNumbers(
         numbers.set(`${step.row},${step.col}`, n);
         pos = step;
       }
-    } else if (action.type === 'shoot') {
-      n += 1;
     }
   }
   return numbers;
@@ -218,6 +225,7 @@ async function runPlayback(options: {
   setFlashIds: (ids: string[]) => void;
   setShootingIds: (ids: string[]) => void;
   setStatus: (status: string) => void;
+  carton: CartonSpec;
 }): Promise<void> {
   let current = options.startTokens;
   let stains = options.startStains;
@@ -241,7 +249,7 @@ async function runPlayback(options: {
     } else if (first.type === 'shot') {
       const shots = frame.flatMap((event) =>
         event.type === 'shot'
-          ? [{ shooterId: event.shooterId, cells: shotPlaybackCells(event) }]
+          ? [{ shooterId: event.shooterId, cells: shotPlaybackCells(event, options.carton) }]
           : [],
       );
       options.setBeams(shots);
@@ -347,6 +355,7 @@ function PlanTimerBar({ deadlineAt }: { deadlineAt: number | null }) {
 }
 
 export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaProps) {
+  const carton = cartonSpec(state.cartonType);
   const local = state.players.find((player) => player.id === state.localPlayerId);
   const localAlive = Boolean(local && isAlive(local));
   const planning = state.phase === 'playing' && state.turnPhase === 'planning';
@@ -354,7 +363,6 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
   const [draft, setDraft] = useState<[ArenaAction | null, ArenaAction | null]>([null, null]);
   const [slotCards, setSlotCards] = useState<[string | null, string | null]>([null, null]);
   const [pendingSit, setPendingSit] = useState<[boolean, boolean]>([false, false]);
-  const [leadSit, setLeadSit] = useState<[boolean, boolean]>([false, false]);
   const [slot, setSlot] = useState<0 | 1>(0);
   const [localLocked, setLocalLocked] = useState(false);
   const [tokens, setTokens] = useState<Token[]>(() => tokensFromState(state));
@@ -370,15 +378,22 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
   const watchGen = useRef(0);
   const submitDraftRef = useRef<() => void>(() => {});
   const canPlan = planning && localAlive && !local?.planSubmitted && !localLocked && !watchingLast;
+  const showPlanOverlay = planning && !watchingLast;
 
   useEffect(() => {
     setDraft([null, null]);
     setSlotCards([null, null]);
     setPendingSit([false, false]);
-    setLeadSit([false, false]);
     setSlot(0);
     setLocalLocked(false);
   }, [state.round, local?.id]);
+
+  useEffect(() => {
+    if (state.phase === 'playing' && state.turnPhase === 'planning') return;
+    setDraft([null, null]);
+    setSlotCards([null, null]);
+    setPendingSit([false, false]);
+  }, [state.phase, state.turnPhase]);
 
   useEffect(() => {
     if (state.turnPhase === 'resolving' && state.timeline.length > 0) return;
@@ -433,6 +448,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         setFlashIds,
         setShootingIds,
         setStatus,
+        carton,
       });
       if (cancelled) return;
       setTokens(tokensFromState(state));
@@ -479,8 +495,10 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
   }, [draft, pendingSit, slotCards, local?.hand]);
 
   const maxWalkFor = (index: 0 | 1) => {
-    if (leadSit[index] || sittingSlot(index)) return WALK_STEPS_AFTER_SIT;
-    if (index === 1 && sittingSlot(0)) return WALK_STEPS_AFTER_SIT;
+    const action = draft[index];
+    if ((action?.type === 'walk' && walkDelay(action)) || sittingSlot(index)) {
+      return WALK_STEPS_AFTER_SIT;
+    }
     return MAX_WALK_STEPS;
   };
 
@@ -488,7 +506,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
   const walkTip = walkPath[walkPath.length - 1] ?? origin;
   const validWalk =
     canPlan && editingMove && walkPath.length < maxWalkFor(slot)
-      ? neighbors8(walkTip).filter((cell) => !isObjectCell(cell, state.mapObjects))
+      ? neighbors8(walkTip, carton).filter((cell) => !isObjectCell(cell, state.mapObjects))
       : [];
 
   const walkTones = useMemo(() => {
@@ -505,14 +523,14 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         if (tone === 'active' || tones.get(key) !== 'active') tones.set(key, tone);
       };
       const from = index === 0 ? start : plannedPositionAfter(start, resolvedDraft[0]);
-      if (action.type === 'stay' || (action.type === 'walk' && leadSit[index])) {
+      if (action.type === 'stay' || (action.type === 'walk' && walkDelay(action))) {
         mark(from);
       }
       if (action.type !== 'walk') return;
       for (const cell of action.path) mark(cell);
     });
     return tones;
-  }, [resolvedDraft, slot, editingMove, local, leadSit]);
+  }, [resolvedDraft, slot, editingMove, local]);
 
   const aimTones = useMemo(() => {
     const tones = new Map<string, OverlayTone>();
@@ -528,33 +546,42 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         const key = `${cell.row},${cell.col}`;
         if (tone === 'active' || tones.get(key) !== 'active') tones.set(key, tone);
       };
-      const fan = weaponFanCells(action.weapon, from, action.dir);
+      const fan = weaponFanCells(action.weapon, from, action.dir, carton, state.mapObjects);
       if (fan) {
         for (const cell of fan) mark(cell);
         return;
       }
-      const ray = shotRayCells(from, action.dir, state.mapObjects, WEAPON_STATS[action.weapon].range);
       if (action.weapon === 'bomb') {
-        const end = ray[ray.length - 1];
-        if (end) {
+        const steps = action.steps ?? WEAPON_STATS.bomb.range;
+        const end = cellAlongRay(from, action.dir, steps, carton);
+        if (!cellsEqual(end, from)) {
           mark(end);
-          for (const cell of bombSplashCells(end)) mark(cell);
+          for (const cell of bombSplashCells(end, carton, state.mapObjects)) mark(cell);
         }
         return;
       }
+      const ray = shotRayCells(
+        from,
+        action.dir,
+        state.mapObjects,
+        carton,
+        WEAPON_STATS[action.weapon].range,
+      );
       for (const cell of ray) mark(cell);
     });
     return tones;
-  }, [draft, slot, local, editingShoot, state.mapObjects]);
+  }, [draft, slot, local, editingShoot, state.mapObjects, carton]);
 
   const cardIds: [string, string] | null =
     slotCards[0] && slotCards[1] ? [slotCards[0], slotCards[1]] : null;
   const legalPlan =
-    local && cardIds ? parseAndValidatePlan(local, resolvedDraft, cardIds, state.mapObjects) : null;
+    local && cardIds
+      ? parseAndValidatePlan(local, resolvedDraft, cardIds, state.mapObjects, carton)
+      : null;
   const beatNumbers = useMemo(() => {
     if (!local) return new Map<string, number>();
-    return planBeatNumbers({ row: local.row, col: local.col }, resolvedDraft, leadSit);
-  }, [local, resolvedDraft, leadSit]);
+    return planBeatNumbers({ row: local.row, col: local.col }, resolvedDraft);
+  }, [local, resolvedDraft]);
   const livingCount = state.players.filter(isAlive).length;
   const submittedCount =
     state.players.filter((player) => isAlive(player) && player.planSubmitted).length +
@@ -577,9 +604,6 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     if (action?.type === 'walk' || action?.type === 'shoot' || action === null) {
       setFlag(setPendingSit, index, false);
     }
-    if (action === null || action.type === 'stay' || action.type === 'shoot') {
-      setFlag(setLeadSit, index, false);
-    }
     let clearSecondCard = false;
     setDraft((current) => {
       const next: [ArenaAction | null, ArenaAction | null] = [...current];
@@ -598,7 +622,6 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     if (clearSecondCard) {
       setSlotCards((current) => [current[0], null]);
       setFlag(setPendingSit, 1, false);
-      setFlag(setLeadSit, 1, false);
     }
   };
 
@@ -645,29 +668,29 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
   const handleCellClick = (cell: Cell) => {
     if (!canPlan || !selectedCard) return;
     if (selectedCard.kind === 'move') {
+      const currentDelay = draft[slot]?.type === 'walk' ? walkDelay(draft[slot]) : 0;
       if (cellsEqual(cell, origin)) {
         if (draft[slot]?.type === 'walk') {
           if (walkPath.length >= maxWalkFor(slot)) return;
           if (!isAdjacent8(walkTip, cell) || isObjectCell(cell, state.mapObjects)) return;
-          setAction(slot, { type: 'walk', path: [...walkPath, cell] });
+          setAction(slot, walkAction([...walkPath, cell], currentDelay));
           return;
         }
         setFlag(setPendingSit, slot, true);
         return;
       }
       if (sittingSlot(slot)) {
-        if (!isAdjacent8(origin, cell) || !isOnBoard(cell) || isObjectCell(cell, state.mapObjects)) {
+        if (!isAdjacent8(origin, cell) || !isOnBoard(cell, carton) || isObjectCell(cell, state.mapObjects)) {
           return;
         }
-        setFlag(setLeadSit, slot, true);
-        setAction(slot, { type: 'walk', path: [cell] });
+        setAction(slot, walkAction([cell], 1));
         return;
       }
       if (walkPath.length >= maxWalkFor(slot)) return;
-      if (!isAdjacent8(walkTip, cell) || !isOnBoard(cell) || isObjectCell(cell, state.mapObjects)) {
+      if (!isAdjacent8(walkTip, cell) || !isOnBoard(cell, carton) || isObjectCell(cell, state.mapObjects)) {
         return;
       }
-      setAction(slot, { type: 'walk', path: [...walkPath, cell] });
+      setAction(slot, walkAction([...walkPath, cell], currentDelay));
       return;
     }
 
@@ -679,9 +702,25 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
       return;
     }
 
+    if (selectedCard.kind === 'bomb') {
+      const dir = directionFromRay(origin, cell);
+      if (!dir) return;
+      const ray = bombThrowCells(origin, dir, carton);
+      const index = ray.findIndex((step) => cellsEqual(step, cell));
+      if (index < 0) return;
+      setAction(slot, { type: 'shoot', weapon: 'bomb', dir, steps: index + 1 });
+      return;
+    }
+
     const dir = directionFromRay(origin, cell);
     if (!dir) return;
-    const ray = shotRayCells(origin, dir, state.mapObjects, WEAPON_STATS[selectedCard.kind].range);
+    const ray = shotRayCells(
+      origin,
+      dir,
+      state.mapObjects,
+      carton,
+      WEAPON_STATS[selectedCard.kind].range,
+    );
     if (!ray.some((step) => cellsEqual(step, cell))) return;
     setAction(slot, { type: 'shoot', weapon: selectedCard.kind, dir });
   };
@@ -690,7 +729,6 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     if (!canPlan) return;
     setAction(slot, null);
     setFlag(setPendingSit, slot, false);
-    setFlag(setLeadSit, slot, false);
     setSlotCards((ids) => {
       const next: [string | null, string | null] = [...ids];
       next[slot] = null;
@@ -706,7 +744,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
 
   const submitDraftOrSit = () => {
     if (!local || !localAlive || local.planSubmitted || localLocked) return;
-    const completed = completePartialPlan(local, resolvedDraft, slotCards, state.mapObjects);
+    const completed = completePartialPlan(local, resolvedDraft, slotCards, state.mapObjects, carton);
     if (!completed) return;
     setLocalLocked(true);
     onSubmitPlan(completed);
@@ -756,6 +794,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         setFlashIds,
         setShootingIds,
         setStatus,
+        carton,
       });
       if (watchGen.current !== gen) return;
       setTokens(tokensFromState(state));
@@ -781,6 +820,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     (planning || (state.phase === 'finished' && replayDone)) &&
     !watchingLast;
 
+  const walkHint = carton.maxPresents > 0 ? PLANNER_HINT_WALK : PLANNER_HINT_WALK_NO_PRESENT;
   const plannerHint = !localAlive
     ? 'You’re scrambled. Watch the rest of the carton.'
     : local?.planSubmitted || localLocked
@@ -790,20 +830,22 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         : !planning
           ? status || 'Watching the carton…'
           : selectedCard?.kind === 'move'
-            ? PLANNER_HINT_WALK
+            ? walkHint
             : selectedCard?.kind === 'slap'
-              ? 'Tap north, east, south, or west. The slap hits the three squares in that facing. Two damage.'
+              ? 'Tap north, east, south, or west. The slap hits the three squares in that facing. An obstacle in front blocks the sides too. Two damage.'
               : selectedCard?.kind === 'flamethrower'
-                ? 'Tap north, east, south, or west. The flame hits two squares ahead, and the sides of the second square. Two damage.'
+                ? 'Tap north, east, south, or west. The flame hits two squares ahead, and the sides of the second square. An obstacle in front stops the rest. Two damage.'
                 : selectedCard?.kind === 'bomb'
-                  ? 'Tap a cell on the line, up to 2 squares. The bomb hits that cell and the four cardinal neighbors. Two damage.'
+                  ? 'Tap a cell on the line, up to 2 squares. Obstacles don’t stop the throw. The bomb hits that cell and open cardinal neighbors. Two damage.'
                   : selectedCard?.kind === 'shotgun'
                     ? 'Tap a cell on the line, up to 3 squares. Two damage.'
                     : selectedCard?.kind === 'rifle'
                       ? 'Tap a cell on the line you want. Unlimited range, two damage.'
                       : selectedCard?.kind === 'pistol'
                         ? 'Tap a cell on the line, up to 3 squares. One damage. Unlimited ammo.'
-                        : 'Pick Walk, Action, or your spare. Walk onto a present to fill the spare slot.';
+                        : carton.maxPresents > 0
+                          ? 'Pick Walk, Action, or your spare. Walk onto a present to fill the spare slot.'
+                          : 'Pick Walk, Action, or your spare.';
 
   const showPlanner = state.phase === 'playing';
 
@@ -811,7 +853,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     <div className="arena">
       <div className="arena-status-row">
         <p className="arena-kicker">
-          {state.phase === 'finished' ? 'All scrambled' : `Round ${state.round}`}
+          {state.phase === 'finished' ? 'All scrambled' : `Round ${state.round} · ${carton.rows}×${carton.cols}`}
         </p>
         <p className="arena-meta-inline">
           {watchingLast
@@ -862,19 +904,33 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         ))}
       </ul>
 
-      <div className="arena-stage">
+      <div
+        className="arena-stage"
+        style={
+          {
+            '--board-rows': carton.rows,
+            '--board-cols': carton.cols,
+          } as React.CSSProperties
+        }
+      >
         <PlanTimerBar deadlineAt={planning ? state.planDeadlineAt : null} />
         <div className="arena-board-slot">
-          <div className="arena-board-wrap">
-            <div className="arena-board" style={{ gridTemplateColumns: `repeat(${BOARD_SIZE}, 1fr)` }}>
-          {Array.from({ length: BOARD_SIZE * BOARD_SIZE }, (_, index) => {
-            const row = Math.floor(index / BOARD_SIZE);
-            const col = index % BOARD_SIZE;
+          <div className={`arena-board-wrap is-${carton.type}`}>
+            <div
+              className="arena-board"
+              style={{
+                gridTemplateColumns: `repeat(${carton.cols}, 1fr)`,
+                gridTemplateRows: `repeat(${carton.rows}, 1fr)`,
+              }}
+            >
+          {Array.from({ length: carton.rows * carton.cols }, (_, index) => {
+            const row = Math.floor(index / carton.cols);
+            const col = index % carton.cols;
             const cell = { row, col };
             const cellKey = `${row},${col}`;
-            const walkTone = walkTones.get(cellKey);
-            const aimTone = aimTones.get(cellKey);
-            const pathIndex = beatNumbers.get(cellKey) ?? 0;
+            const walkTone = showPlanOverlay ? walkTones.get(cellKey) : undefined;
+            const aimTone = showPlanOverlay ? aimTones.get(cellKey) : undefined;
+            const pathIndex = showPlanOverlay ? (beatNumbers.get(cellKey) ?? 0) : 0;
             const isValid = validWalk.some((step) => cellsEqual(step, cell));
             const isOrigin = canPlan && cellsEqual(origin, cell);
             const hasBlock = isObjectCell(cell, state.mapObjects);
@@ -893,6 +949,8 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                 key={`${row}-${col}`}
                 type="button"
                 className={`arena-cell${(row + col) % 2 === 0 ? ' shade' : ''}${
+                  col === carton.cols - 1 ? ' is-last-col' : ''
+                }${row === carton.rows - 1 ? ' is-last-row' : ''}${
                   walkTone === 'muted' ? ' on-path-muted' : ''
                 }${aimTone === 'muted' ? ' on-aim-muted' : ''}${
                   walkTone === 'active' ? ' on-path' : ''
@@ -927,6 +985,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                     isDown={token.hp <= 0}
                     isHit={flashIds.includes(token.id)}
                     isShooting={shootingIds.includes(token.id)}
+                    isHatched={showOutcome && token.id === winnerId}
                     bump={bumps[token.id]}
                     tiltSeed={`${token.id}:${token.row}:${token.col}`}
                   />
@@ -1041,12 +1100,12 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         <div className="arena-outcome">
           <p className="arena-kicker">
             {state.outcome.kind === 'winner'
-              ? `${winner?.name ?? 'Someone'} hatched it`
+              ? `${winner?.name ?? 'Someone'} Hatched`
               : 'Double yolk'}
           </p>
           <p className="arena-copy">
             {state.outcome.kind === 'winner'
-              ? `${winner?.hp ?? 0} shells still intact.`
+              ? `${winner?.hp ?? 0} HP Left`
               : 'Last eggs cracked on the same beat.'}
           </p>
         </div>
@@ -1063,7 +1122,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             Rewatch
           </button>
           <button type="button" className="btn btn-primary" onClick={onReturnToLobby}>
-            That&apos;s Eggs
+            Back to the Nest
           </button>
         </div>
       )}

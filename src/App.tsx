@@ -3,7 +3,7 @@ import { useGameRoom } from './context/GameRoomContext';
 import { Eggsplanation } from './components/Eggsplanation';
 import { RoomShell } from './components/RoomShell';
 import { Toast } from './components/Toast';
-import { MAX_PLAYERS, MIN_PLAYERS, PLAYER_HUES } from './types/game';
+import { cartonSpec, MIN_PLAYERS, PLAYER_HUES } from './types/game';
 
 function HomeEggCluster() {
   const shell =
@@ -24,7 +24,7 @@ function HomeEggCluster() {
   );
 
   return (
-    <svg className="home-egg-stack" viewBox="0 0 280 210" aria-hidden="true">
+    <svg className="home-egg-stack" viewBox="8 64 264 142" aria-hidden="true">
       {place(48, 132, 0.62, -16, PLAYER_HUES[3])}
       {place(218, 132, 0.64, 14, PLAYER_HUES[2])}
       {place(82, 132, 0.74, -6, PLAYER_HUES[1])}
@@ -59,6 +59,7 @@ export function App() {
   if (state) {
     const connectedPlayers = state.players.filter((player) => player.connected);
     const isHost = state.localPlayerId === state.hostPlayerId;
+    const carton = cartonSpec(state.cartonType);
 
     return (
       <RoomShell
@@ -67,13 +68,14 @@ export function App() {
         canStart={
           isHost &&
           connectedPlayers.length >= MIN_PLAYERS &&
-          connectedPlayers.length <= MAX_PLAYERS &&
+          connectedPlayers.length <= carton.maxPlayers &&
           state.phase === 'lobby'
         }
         isHost={isHost}
         onStart={startGame}
         onAddBot={addBot}
         onRemoveBot={removeBot}
+        onSetCartonType={(cartonType) => sendPlayerAction({ type: 'setCartonType', cartonType })}
         onLeave={leaveRoom}
         onSubmitPlan={(plan) => sendPlayerAction({ type: 'submitPlan', ...plan })}
         onReturnToLobby={() => sendPlayerAction({ type: 'returnToLobby' })}
@@ -99,6 +101,7 @@ export function App() {
 
   return (
     <div className="app-shell">
+      <div className="home-backdrop" aria-hidden="true" />
       <main className="home-main">
         <header className="home-hero">
           <div className="home-lockup">

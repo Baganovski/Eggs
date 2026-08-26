@@ -1,8 +1,9 @@
 import { JoinCodeBar } from './JoinCodeBar';
 import { LobbyRoster } from './LobbyRoster';
+import { CartonPicker } from './CartonPicker';
 import { Arena } from './Arena';
 import { Toast } from './Toast';
-import { MAX_PLAYERS, MIN_PLAYERS, type ArenaAction, type GameState } from '../types/game';
+import { cartonSpec, MIN_PLAYERS, type ArenaAction, type CartonType, type GameState } from '../types/game';
 
 interface RoomShellProps {
   state: GameState;
@@ -12,6 +13,7 @@ interface RoomShellProps {
   onStart: () => void;
   onAddBot: () => void;
   onRemoveBot: (playerId: string) => void;
+  onSetCartonType: (cartonType: CartonType) => void;
   onLeave: () => void;
   onSubmitPlan: (plan: { cardIds: [string, string]; actions: [ArenaAction, ArenaAction] }) => void;
   onReturnToLobby: () => void;
@@ -42,7 +44,7 @@ function PanelHeader({
 const lobbyHeader = {
   eyebrow: 'Incubating',
   title: 'The carton is filling',
-  copy: `Share the nest code, or add a bot. The hen starts with ${MIN_PLAYERS}–${MAX_PLAYERS} eggs.`,
+  copy: 'Share the nest code, or add a bot. The hen picks a carton, then starts the scramble.',
 };
 
 export function RoomShell({
@@ -53,6 +55,7 @@ export function RoomShell({
   onStart,
   onAddBot,
   onRemoveBot,
+  onSetCartonType,
   onLeave,
   onSubmitPlan,
   onReturnToLobby,
@@ -62,6 +65,7 @@ export function RoomShell({
   onDismissError,
 }: RoomShellProps) {
   const { phase } = state;
+  const carton = cartonSpec(state.cartonType);
 
   return (
     <div className="room-shell">
@@ -83,13 +87,21 @@ export function RoomShell({
                 joinOrder: player.joinOrder,
               }))}
               connectedCount={connectedCount}
+              maxSeats={carton.maxPlayers}
               canManageBots={isHost && phase === 'lobby'}
               onRemoveBot={onRemoveBot}
             />
 
+            <CartonPicker
+              value={state.cartonType}
+              playerCount={state.players.length}
+              isHost={isHost}
+              onChange={onSetCartonType}
+            />
+
             {isHost ? (
               <div className="lobby-actions">
-                {connectedCount < MAX_PLAYERS && (
+                {connectedCount < carton.maxPlayers && (
                   <button type="button" className="btn btn-secondary" onClick={onAddBot}>
                     Add a bot
                   </button>
@@ -102,7 +114,7 @@ export function RoomShell({
                 >
                   {canStart
                     ? 'Crack on'
-                    : `Need ${MIN_PLAYERS}+ eggs (${connectedCount}/${MAX_PLAYERS})`}
+                    : `Need ${MIN_PLAYERS}+ eggs (${connectedCount}/${carton.maxPlayers})`}
                 </button>
               </div>
             ) : (

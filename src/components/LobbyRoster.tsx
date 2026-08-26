@@ -1,8 +1,8 @@
-import { MAX_PLAYERS } from '../types/game';
 import { PlayerToken } from './PlayerToken';
 
 interface LobbyRosterProps {
   connectedCount: number;
+  maxSeats: number;
   canManageBots: boolean;
   onRemoveBot: (playerId: string) => void;
   players: Array<{
@@ -19,16 +19,17 @@ interface LobbyRosterProps {
 export function LobbyRoster({
   players,
   connectedCount,
+  maxSeats,
   canManageBots,
   onRemoveBot,
 }: LobbyRosterProps) {
-  const seats = Array.from({ length: MAX_PLAYERS }, (_, index) => players[index] ?? null);
+  const seats = Array.from({ length: maxSeats }, (_, index) => players[index] ?? null);
 
   return (
     <div className="roster">
       <div className="roster-meta">
         <span>{connectedCount} in the carton</span>
-        <span>{MAX_PLAYERS - connectedCount} cups open</span>
+        <span>{Math.max(0, maxSeats - connectedCount)} cups open</span>
       </div>
       <ul className="roster-list">
         {seats.map((player, index) => (

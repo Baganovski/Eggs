@@ -8,7 +8,7 @@ import type {
   RoomCallbacks,
   RoomMessage,
 } from '../types/game';
-import { MAX_PLAYERS, MIN_PLAYERS, PLAN_DEADLINE_GRACE_MS } from '../types/game';
+import { MIN_PLAYERS, PLAN_DEADLINE_GRACE_MS, cartonSpec } from '../types/game';
 import {
   applyResolvedRound,
   beginPlanningRound,
@@ -53,10 +53,12 @@ export class RoomSession {
   private destroyed = false;
   private migrationInProgress = false;
   private pendingPlans = new Map<string, [ArenaAction, ArenaAction]>();
+  private forcedPlans = new Set<string>();
   private playbackTimer: ReturnType<typeof setTimeout> | null = null;
   private botPlanGeneration = 0;
   private botTimers: ReturnType<typeof setTimeout>[] = [];
   private planTimer: ReturnType<typeof setTimeout> | null = null;
+  private latePlanTimer: ReturnType<typeof setTimeout> | null = null;
 
   private constructor(state: GameState, callbacks: RoomCallbacks) {
     this.state = state;
@@ -118,7 +120,7 @@ export class RoomSession {
     if (!this.isHost) return;
     if (this.state.phase !== 'lobby') return;
     const activeCount = this.state.players.filter((player) => player.connected).length;
-    if (activeCount >= MAX_PLAYERS) {
+    if (activeCount >= cartonSpec(this.state.cartonType).maxPlayers) {
       this.emitError('This nest is full.');
       return;
     }
@@ -144,7 +146,7 @@ export class RoomSession {
     this.clearPlaybackTimer();
     this.clearBotTimers();
     this.clearPlanTimer();
-    this.pendingPlans.clear();
+    this.clearPendingPlans();
     for (const connection of this.connections.values()) {
       connection.close();
     }
@@ -159,6 +161,29 @@ export class RoomSession {
       clearTimeout(this.planTimer);
       this.planTimer = null;
     }
+  }
+
+  private clearLatePlanTimer(): void {
+    if (this.latePlanTimer !== null) {
+      clearTimeout(this.latePlanTimer);
+      this.latePlanTimer = null;
+    }
+  }
+
+  private clearPendingPlans(): void {
+    this.pendingPlans.clear();
+    this.forcedPlans.clear();
+    this.clearLatePlanTimer();
+  }
+
+  private scheduleLatePlanResolve(): void {
+    this.clearLatePlanTimer();
+    if (!this.isHost) return;
+    this.latePlanTimer = setTimeout(() => {
+      this.latePlanTimer = null;
+      if (this.destroyed || !this.isHost) return;
+      this.tryResolveIfReady();
+    }, PLAN_DEADLINE_GRACE_MS);
   }
 
   private schedulePlanDeadline(): void {
@@ -181,6 +206,7 @@ export class RoomSession {
     for (const player of this.state.players.filter(isAlive)) {
       if (this.pendingPlans.has(player.id)) continue;
       this.pendingPlans.set(player.id, STAY_PLAN);
+      this.forcedPlans.add(player.id);
       filled = true;
     }
     if (filled) {
@@ -190,6 +216,9 @@ export class RoomSession {
           isAlive(player) && !player.planSubmitted ? { ...player, planSubmitted: true } : player,
         ),
       };
+      this.syncState();
+      this.scheduleLatePlanResolve();
+      return;
     }
     this.tryResolveIfReady();
   }
@@ -228,7 +257,13 @@ export class RoomSession {
   private submitBotPlan(playerId: string): void {
     const player = this.state.players.find((entry) => entry.id === playerId);
     if (!player?.isBot) return;
-    const plan = chooseBotPlan(player, this.state.players, this.state.mapObjects, this.state.presents ?? []);
+    const plan = chooseBotPlan(
+      player,
+      this.state.players,
+      this.state.mapObjects,
+      this.state.presents ?? [],
+      cartonSpec(this.state.cartonType),
+    );
     this.handlePlayerAction(playerId, {
       type: 'submitPlan',
       cardIds: plan.cardIds,
@@ -279,15 +314,17 @@ export class RoomSession {
       return;
     }
 
+    if (this.latePlanTimer !== null && this.forcedPlans.size > 0) return;
+
     const result = resolveRound(
       this.state.players,
       this.pendingPlans,
       this.state.mapObjects,
       this.state.eggStains ?? [],
       this.state.presents ?? [],
+      cartonSpec(this.state.cartonType),
     );
-    this.pendingPlans.clear();
-    this.clearPlanTimer();
+    this.clearPendingPlans();
     this.state = applyResolvedRound(this.state, result);
     this.syncState();
 
@@ -310,15 +347,23 @@ export class RoomSession {
     if (this.state.phase !== 'playing' || this.state.turnPhase !== 'planning') return;
     const player = this.state.players.find((entry) => entry.id === playerId);
     if (!player?.connected || !isAlive(player)) return;
-    if (player.planSubmitted || this.pendingPlans.has(playerId)) return;
+    const replaceable = this.forcedPlans.has(playerId);
+    if ((player.planSubmitted || this.pendingPlans.has(playerId)) && !replaceable) return;
 
-    const plan = parseAndValidatePlan(player, action.actions, action.cardIds, this.state.mapObjects);
+    const plan = parseAndValidatePlan(
+      player,
+      action.actions,
+      action.cardIds,
+      this.state.mapObjects,
+      cartonSpec(this.state.cartonType),
+    );
     if (!plan) {
       this.rejectPlan(playerId, 'That scramble is not legal.');
       return;
     }
 
     this.pendingPlans.set(playerId, plan);
+    this.forcedPlans.delete(playerId);
     this.state = {
       ...this.state,
       players: this.state.players.map((entry) =>
@@ -517,7 +562,10 @@ export class RoomSession {
         this.emitState();
         break;
       case 'lobbyUpdate':
-        this.updateState({ players: message.players });
+        this.updateState({
+          players: message.players,
+          cartonType: message.cartonType ?? this.state.cartonType,
+        });
         break;
       case 'stateSync':
         this.state = withLocalId(message.state, this.state.localPlayerId);
@@ -572,7 +620,7 @@ export class RoomSession {
         player.id === disconnectedSeat.id ? nextPlayer : player,
       );
     } else {
-      if (activeCount >= MAX_PLAYERS) {
+      if (activeCount >= cartonSpec(this.state.cartonType).maxPlayers) {
         this.send({ type: 'error', message: 'This nest is full.' }, connection);
         connection.close();
         return;
@@ -600,7 +648,11 @@ export class RoomSession {
 
   private broadcastLobby(): void {
     const players = [...this.state.players];
-    this.broadcast({ type: 'lobbyUpdate', players });
+    this.broadcast({
+      type: 'lobbyUpdate',
+      players,
+      cartonType: this.state.cartonType,
+    });
     this.emitState();
   }
 
@@ -617,12 +669,20 @@ export class RoomSession {
     if (connectedCount < MIN_PLAYERS) {
       this.broadcast({
         type: 'notice',
-        message: `Need at least ${MIN_PLAYERS} eggs to scramble (${connectedCount}/${MAX_PLAYERS}).`,
+        message: `Need at least ${MIN_PLAYERS} eggs to scramble (${connectedCount}/${cartonSpec(this.state.cartonType).maxPlayers}).`,
+      });
+      return;
+    }
+    const carton = cartonSpec(this.state.cartonType);
+    if (connectedCount > carton.maxPlayers) {
+      this.broadcast({
+        type: 'notice',
+        message: `That carton only holds ${carton.maxPlayers} eggs.`,
       });
       return;
     }
     if (this.state.phase !== 'lobby') return;
-    this.pendingPlans.clear();
+    this.clearPendingPlans();
     this.clearPlaybackTimer();
     this.clearBotTimers();
     this.clearPlanTimer();
@@ -644,7 +704,7 @@ export class RoomSession {
     this.clearPlaybackTimer();
     this.clearBotTimers();
     this.clearPlanTimer();
-    this.pendingPlans.clear();
+    this.clearPendingPlans();
     this.state = next;
     this.syncState();
   }
@@ -741,7 +801,7 @@ export class RoomSession {
     this.clearPlaybackTimer();
     this.clearBotTimers();
     this.clearPlanTimer();
-    this.pendingPlans.clear();
+    this.clearPendingPlans();
     this.state = resetPlanningAfterHandoff(this.state);
     for (const connection of this.connections.values()) {
       connection.close();
