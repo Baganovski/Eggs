@@ -58,31 +58,30 @@ export function Eggsplanation() {
 
           <ul className="eggsplanation-list">
             <li className="eggsplanation-item">
-              <h3>How to play</h3>
+              <h3>The scramble</h3>
               <p>
-                You’re an egg with 3 HP. Each round, pick two moves — walk, sit, or
-                use an action. Last egg standing wins.
+                You’re an egg with 3 HP. Each round, pick two moves — walk, sit
+                tight, or an action. Last egg uncracked hatches.
               </p>
             </li>
             <li className="eggsplanation-item">
-              <h3>Everyone goes at once</h3>
+              <h3>Whole carton at once</h3>
               <p>
-                Nobody waits their turn. The whole carton plans at the same time,
-                then everyone’s moves play out together.
+                Nobody waits their turn. The whole carton plans together, then
+                the scramble plays out at once.
               </p>
             </li>
             <li className="eggsplanation-item">
               <h3>Beats</h3>
               <p>
-                The round ticks in beats, like a shared metronome. If you walk,
-                each step is one beat. Actions happen at the end of a beat, so
-                everyone acts on the same tick.
+                On each move, walks finish first — one step per beat, together.
+                Sit holds a beat. Then the actions crack.
               </p>
             </li>
           </ul>
 
           <button type="submit" className="btn btn-primary">
-            Got it
+            Crack on
           </button>
         </form>
       </dialog>

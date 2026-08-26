@@ -42,10 +42,75 @@ export interface Cell {
   col: number;
 }
 
+export const CARTON_TYPES = ['halfDozen', 'full'] as const;
+export type CartonType = (typeof CARTON_TYPES)[number];
+export const DEFAULT_CARTON_TYPE: CartonType = 'full';
+
+export interface CartonSpec {
+  type: CartonType;
+  rows: number;
+  cols: number;
+  minPlayers: number;
+  maxPlayers: number;
+  maxPresents: number;
+  obstacleCount: number;
+  starts: Cell[];
+}
+
+export const CARTON_SPECS: Record<CartonType, CartonSpec> = {
+  halfDozen: {
+    type: 'halfDozen',
+    rows: 2,
+    cols: 3,
+    minPlayers: 2,
+    maxPlayers: 2,
+    maxPresents: 0,
+    obstacleCount: 0,
+    starts: [
+      { row: 0, col: 0 },
+      { row: 1, col: 2 },
+    ],
+  },
+  full: {
+    type: 'full',
+    rows: 7,
+    cols: 7,
+    minPlayers: 2,
+    maxPlayers: 4,
+    maxPresents: 2,
+    obstacleCount: 3,
+    starts: [
+      { row: 0, col: 0 },
+      { row: 6, col: 6 },
+      { row: 6, col: 0 },
+      { row: 0, col: 6 },
+    ],
+  },
+};
+
+export function isCartonType(value: unknown): value is CartonType {
+  return typeof value === 'string' && (CARTON_TYPES as readonly string[]).includes(value);
+}
+
+export function cartonSpec(type: CartonType | null | undefined): CartonSpec {
+  return CARTON_SPECS[isCartonType(type) ? type : DEFAULT_CARTON_TYPE];
+}
+
+export function cartonFitsPlayerCount(type: CartonType, count: number): boolean {
+  const spec = cartonSpec(type);
+  return count >= spec.minPlayers && count <= spec.maxPlayers;
+}
+
+export function cartonNeedsLabel(type: CartonType): string {
+  const spec = cartonSpec(type);
+  if (spec.minPlayers === spec.maxPlayers) return `Needs ${spec.minPlayers} players`;
+  return `Needs ${spec.minPlayers}–${spec.maxPlayers} players`;
+}
+
 export type ArenaAction =
   | { type: 'stay' }
-  | { type: 'shoot'; weapon: WeaponKind; dir: Direction }
-  | { type: 'walk'; path: Cell[] };
+  | { type: 'shoot'; weapon: WeaponKind; dir: Direction; steps?: number }
+  | { type: 'walk'; path: Cell[]; delay?: number };
 
 export type MatchOutcome =
   | { kind: 'none' }
@@ -107,6 +172,7 @@ export interface GameState {
   phase: GamePhase;
   turnPhase: TurnPhase;
   round: number;
+  cartonType: CartonType;
   outcome: MatchOutcome;
   timeline: PlaybackEvent[];
   roundStart: RoundStartToken[] | null;
@@ -124,13 +190,14 @@ export type PublicGameState = Omit<GameState, 'localPlayerId'>;
 
 export type PlayerAction =
   | { type: 'submitPlan'; cardIds: [string, string]; actions: [ArenaAction, ArenaAction] }
+  | { type: 'setCartonType'; cartonType: CartonType }
   | { type: 'endMatch' }
   | { type: 'returnToLobby' };
 
 export type RoomMessage =
   | { type: 'join'; name: string; playerId: string }
   | { type: 'joinAck'; playerId: string; state: PublicGameState }
-  | { type: 'lobbyUpdate'; players: Player[] }
+  | { type: 'lobbyUpdate'; players: Player[]; cartonType: CartonType }
   | { type: 'start'; startedBy: string }
   | { type: 'stateSync'; state: PublicGameState }
   | { type: 'playerAction'; playerId: string; action: PlayerAction }

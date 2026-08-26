@@ -8,6 +8,7 @@ interface PlayerTokenProps {
   isDown?: boolean;
   isHit?: boolean;
   isShooting?: boolean;
+  isHatched?: boolean;
   bump?: { dr: number; dc: number };
   tiltSeed?: string;
 }
@@ -40,6 +41,76 @@ function Face({ isHit }: { isHit?: boolean }) {
   );
 }
 
+function Chick({ hue }: { hue: string }) {
+  return (
+    <svg viewBox="0 0 120 150" aria-hidden="true">
+      <ellipse className="chick-shadow" cx="60" cy="140" rx="28" ry="5" fill="#111" opacity="0.18" />
+      <g className="chick-body">
+        <ellipse
+          cx="60"
+          cy="98"
+          rx="36"
+          ry="40"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="22"
+          strokeLinejoin="round"
+        />
+        <ellipse cx="60" cy="98" rx="36" ry="40" fill="#ffe066" />
+        <ellipse cx="60" cy="98" rx="36" ry="40" fill={hue} opacity="0.35" />
+        <circle
+          cx="60"
+          cy="50"
+          r="26"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="22"
+          strokeLinejoin="round"
+        />
+        <circle cx="60" cy="50" r="26" fill="#ffe066" />
+        <circle cx="60" cy="50" r="26" fill={hue} opacity="0.28" />
+        <path
+          d="M60 58 L50 70 L70 70 Z"
+          fill="#f0b429"
+          stroke="currentColor"
+          strokeWidth="5"
+          strokeLinejoin="round"
+        />
+        <g fill="none" stroke="currentColor" strokeWidth="5" strokeLinecap="round">
+          <circle cx="50" cy="46" r="4.5" fill="currentColor" />
+          <circle cx="70" cy="46" r="4.5" fill="currentColor" />
+          <path d="M46 132 L40 144 M46 132 L52 144" />
+          <path d="M74 132 L68 144 M74 132 L80 144" />
+        </g>
+        <g className="chick-wing chick-wing-l">
+          <ellipse
+            cx="38"
+            cy="92"
+            rx="12"
+            ry="18"
+            fill="#ffe066"
+            stroke="currentColor"
+            strokeWidth="8"
+            strokeLinejoin="round"
+          />
+        </g>
+        <g className="chick-wing chick-wing-r">
+          <ellipse
+            cx="82"
+            cy="92"
+            rx="12"
+            ry="18"
+            fill="#ffe066"
+            stroke="currentColor"
+            strokeWidth="8"
+            strokeLinejoin="round"
+          />
+        </g>
+      </g>
+    </svg>
+  );
+}
+
 function FriedEgg({ hue }: { hue: string }) {
   const whitePath =
     'M28 70 C22 52 38 40 54 44 C62 28 90 32 98 52 C112 56 118 78 106 96 C110 118 84 128 64 122 C42 132 18 118 22 98 C12 88 18 76 28 70 Z';
@@ -68,6 +139,7 @@ export function PlayerToken({
   isDown,
   isHit,
   isShooting,
+  isHatched,
   bump,
   tiltSeed,
 }: PlayerTokenProps) {
@@ -78,7 +150,9 @@ export function PlayerToken({
     <span
       className={`arena-token${isYou ? ' is-you' : ''}${isDown ? ' is-down' : ''}${
         isHit ? ' is-hit' : ''
-      }${isShooting ? ' is-shooting' : ''}${bump ? ' is-bump' : ''}`}
+      }${isShooting ? ' is-shooting' : ''}${isHatched ? ' is-hatched' : ''}${
+        bump ? ' is-bump' : ''
+      }`}
       style={
         {
           '--bump-dr': bump?.dr ?? 0,
@@ -86,9 +160,19 @@ export function PlayerToken({
           '--egg-tilt': `${tilt}deg`,
         } as CSSProperties
       }
-      title={isDown ? `${name} fried` : isShooting ? `${name} shooting` : name}
+      title={
+        isHatched
+          ? `${name} hatched`
+          : isDown
+            ? `${name} fried`
+            : isShooting
+              ? `${name} shooting`
+              : name
+      }
     >
-      {isDown ? (
+      {isHatched ? (
+        <Chick hue={hue} />
+      ) : isDown ? (
         <FriedEgg hue={hue} />
       ) : (
         <svg viewBox="0 0 120 150" aria-hidden="true">

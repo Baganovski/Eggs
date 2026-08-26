@@ -2,6 +2,7 @@ import {
   CARDINAL_DIRS,
   MAX_WALK_STEPS,
   type ArenaAction,
+  type CartonSpec,
   type Cell,
   type Direction,
   type Player,
@@ -57,16 +58,33 @@ function bestShotForWeapon(
   others: Player[],
   selfId: string,
   mapObjects: Cell[],
+  carton: CartonSpec,
 ): Direction | null {
   if (isCardinalWeapon(weapon)) {
     for (const dir of CARDINAL_DIRS) {
-      const cells = weaponFanCells(weapon, from, dir) ?? [];
+      const cells = weaponFanCells(weapon, from, dir, carton, mapObjects) ?? [];
       if (cells.some((cell) => occupantAtCell(others, cell, selfId))) return dir;
     }
     return null;
   }
 
   const range = WEAPON_STATS[weapon].range;
+  if (weapon === 'bomb') {
+    const lined = others
+      .filter((player) => player.id !== selfId && isAlive(player))
+      .map((player) => ({
+        player,
+        dir: directionFromRay(from, player),
+        dist: chebyshev(from, player),
+      }))
+      .filter((entry): entry is { player: Player; dir: Direction; dist: number } => {
+        if (!entry.dir) return false;
+        return entry.dist >= 1 && entry.dist <= range;
+      })
+      .sort((a, b) => a.dist - b.dist);
+    return lined[0]?.dir ?? null;
+  }
+
   const lined = others
     .filter((player) => player.id !== selfId && isAlive(player))
     .map((player) => ({
@@ -76,7 +94,7 @@ function bestShotForWeapon(
     }))
     .filter((entry): entry is { player: Player; dir: Direction; dist: number } => {
       if (!entry.dir) return false;
-      const ray = shotRayCells(from, entry.dir, mapObjects, range);
+      const ray = shotRayCells(from, entry.dir, mapObjects, carton, range);
       const blocked = ray.findIndex((cell) => isObjectCell(cell, mapObjects));
       const target = ray.findIndex(
         (cell) => cell.row === entry.player.row && cell.col === entry.player.col,
@@ -95,13 +113,14 @@ function walkToward(
   others: Player[],
   selfId: string,
   mapObjects: Cell[],
+  carton: CartonSpec,
 ): ArenaAction {
   const stepsWanted = Math.min(MAX_WALK_STEPS, Math.max(1, chebyshev(from, target)));
   const path: Cell[] = [];
   let cursor = from;
 
   for (let step = 0; step < stepsWanted; step += 1) {
-    const options = neighbors8(cursor)
+    const options = neighbors8(cursor, carton)
       .filter((cell) => !occupiedByOthers(cell, others, selfId, mapObjects))
       .sort((a, b) => {
         const da = chebyshev(a, target);
@@ -112,7 +131,7 @@ function walkToward(
 
     const next = options[0];
     if (!next || (next.row === cursor.row && next.col === cursor.col)) break;
-    if (!isOnBoard(next)) break;
+    if (!isOnBoard(next, carton)) break;
     path.push(next);
     cursor = next;
     if (chebyshev(cursor, target) === 0) break;
@@ -128,9 +147,20 @@ function actionForWeapon(
   others: Player[],
   selfId: string,
   mapObjects: Cell[],
+  carton: CartonSpec,
 ): ArenaAction | null {
-  const dir = bestShotForWeapon(from, weapon, others, selfId, mapObjects);
+  const dir = bestShotForWeapon(from, weapon, others, selfId, mapObjects, carton);
   if (!dir) return null;
+  if (weapon === 'bomb') {
+    const target = others.find(
+      (player) =>
+        player.id !== selfId &&
+        isAlive(player) &&
+        directionFromRay(from, player) === dir,
+    );
+    const steps = target ? chebyshev(from, target) : WEAPON_STATS.bomb.range;
+    return { type: 'shoot', weapon, dir, steps };
+  }
   return { type: 'shoot', weapon, dir };
 }
 
@@ -139,6 +169,7 @@ export function chooseBotPlan(
   players: Player[],
   mapObjects: Cell[],
   presents: Cell[] = [],
+  carton: CartonSpec,
 ): { cardIds: [string, string]; actions: [ArenaAction, ArenaAction] } {
   const moveCard = bot.hand.find((card) => card.kind === 'move');
   const actionCards = bot.hand.filter((card) => card.kind !== 'move');
@@ -159,7 +190,7 @@ export function chooseBotPlan(
     );
     if (enemy) {
       for (const card of unused) {
-        const shot = actionForWeapon(from, card.kind, players, bot.id, mapObjects);
+        const shot = actionForWeapon(from, card.kind, players, bot.id, mapObjects, carton);
         if (shot && Math.random() < 0.8) {
           return { cardId: card.id, action: shot };
         }
@@ -168,7 +199,7 @@ export function chooseBotPlan(
     const present = !bot.spareWeapon ? nearestPresent(from) : null;
     const walkTarget = present ?? enemy;
     if (walkTarget) {
-      return { cardId: moveCard.id, action: walkToward(from, walkTarget, players, bot.id, mapObjects) };
+      return { cardId: moveCard.id, action: walkToward(from, walkTarget, players, bot.id, mapObjects, carton) };
     }
     return { cardId: moveCard.id, action: { type: 'stay' } };
   };

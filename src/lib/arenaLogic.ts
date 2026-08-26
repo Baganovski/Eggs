@@ -1,5 +1,4 @@
 import {
-  BOARD_SIZE,
   CARDINAL_DIRS,
   DIR_DELTA,
   DIRECTIONS,
@@ -9,8 +8,10 @@ import {
   STARTING_HP,
   PICKUP_WEAPON_KINDS,
   WEAPON_KINDS,
+  cartonSpec,
   type ArenaAction,
   type CardinalDir,
+  type CartonSpec,
   type Cell,
   type Direction,
   type GameState,
@@ -22,16 +23,6 @@ import {
   type RoundStartToken,
   type WeaponKind,
 } from '../types/game';
-
-export const START_CORNERS: Cell[] = [
-  { row: 0, col: 0 },
-  { row: BOARD_SIZE - 1, col: BOARD_SIZE - 1 },
-  { row: BOARD_SIZE - 1, col: 0 },
-  { row: 0, col: BOARD_SIZE - 1 },
-];
-
-export const OBSTACLE_COUNT = 3;
-export const MAX_PRESENTS = 2;
 
 export const WEAPON_STATS: Record<WeaponKind, { range: number; damage: number }> = {
   pistol: { range: 3, damage: 1 },
@@ -107,30 +98,52 @@ export function viewStateFor(state: GameState, viewerId: string): PublicGameStat
   };
 }
 
-export function slapFanCells(from: Cell, dir: Direction): Cell[] {
+export function slapFanCells(
+  from: Cell,
+  dir: Direction,
+  carton: CartonSpec,
+  mapObjects: Cell[] = [],
+): Cell[] {
   if (!isCardinalDir(dir)) return [];
+  const forwardDelta = DIR_DELTA[dir];
+  const forward = { row: from.row + forwardDelta.dr, col: from.col + forwardDelta.dc };
+  if (isObjectCell(forward, mapObjects)) return [];
   return SLAP_FAN[dir]
     .map((facing) => {
       const delta = DIR_DELTA[facing];
       return { row: from.row + delta.dr, col: from.col + delta.dc };
     })
-    .filter(isOnBoard);
+    .filter((cell) => isOnBoard(cell, carton) && !isObjectCell(cell, mapObjects));
 }
 
-export function flameCells(from: Cell, dir: Direction): Cell[] {
+export function flameCells(
+  from: Cell,
+  dir: Direction,
+  carton: CartonSpec,
+  mapObjects: Cell[] = [],
+): Cell[] {
   if (!isCardinalDir(dir)) return [];
   const forward = DIR_DELTA[dir];
   const side = dir === 'N' || dir === 'S' ? { dr: 0, dc: 1 } : { dr: 1, dc: 0 };
   const first = { row: from.row + forward.dr, col: from.col + forward.dc };
+  if (isObjectCell(first, mapObjects)) return [];
   const second = { row: from.row + forward.dr * 2, col: from.col + forward.dc * 2 };
   const left = { row: second.row - side.dr, col: second.col - side.dc };
   const right = { row: second.row + side.dr, col: second.col + side.dc };
-  return [first, second, left, right].filter(isOnBoard);
+  return [first, second, left, right].filter(
+    (cell) => isOnBoard(cell, carton) && !isObjectCell(cell, mapObjects),
+  );
 }
 
-export function weaponFanCells(weapon: WeaponKind, from: Cell, dir: Direction): Cell[] | null {
-  if (weapon === 'slap') return slapFanCells(from, dir);
-  if (weapon === 'flamethrower') return flameCells(from, dir);
+export function weaponFanCells(
+  weapon: WeaponKind,
+  from: Cell,
+  dir: Direction,
+  carton: CartonSpec,
+  mapObjects: Cell[] = [],
+): Cell[] | null {
+  if (weapon === 'slap') return slapFanCells(from, dir, carton, mapObjects);
+  if (weapon === 'flamethrower') return flameCells(from, dir, carton, mapObjects);
   return null;
 }
 
@@ -138,11 +151,59 @@ export function isCardinalWeapon(weapon: WeaponKind): boolean {
   return weapon === 'slap' || weapon === 'flamethrower';
 }
 
-export function bombSplashCells(epicenter: Cell): Cell[] {
+export function bombSplashCells(
+  epicenter: Cell,
+  carton: CartonSpec,
+  mapObjects: Cell[] = [],
+): Cell[] {
   return CARDINAL_DIRS.map((dir) => {
     const delta = DIR_DELTA[dir];
     return { row: epicenter.row + delta.dr, col: epicenter.col + delta.dc };
-  }).filter(isOnBoard);
+  }).filter((cell) => isOnBoard(cell, carton) && !isObjectCell(cell, mapObjects));
+}
+
+export function cellAlongRay(
+  from: Cell,
+  dir: Direction,
+  steps: number,
+  carton: CartonSpec,
+): Cell {
+  const { dr, dc } = DIR_DELTA[dir];
+  let cell = { ...from };
+  for (let i = 0; i < steps; i += 1) {
+    const next = { row: cell.row + dr, col: cell.col + dc };
+    if (!isOnBoard(next, carton)) break;
+    cell = next;
+  }
+  return cell;
+}
+
+export function bombThrowCells(
+  from: Cell,
+  dir: Direction,
+  carton: CartonSpec,
+  maxRange = WEAPON_STATS.bomb.range,
+): Cell[] {
+  const { dr, dc } = DIR_DELTA[dir];
+  const cells: Cell[] = [];
+  let row = from.row + dr;
+  let col = from.col + dc;
+  while (isOnBoard({ row, col }, carton) && cells.length < maxRange) {
+    cells.push({ row, col });
+    row += dr;
+    col += dc;
+  }
+  return cells;
+}
+
+export function walkDelay(action: ArenaAction | null | undefined): number {
+  return action?.type === 'walk' && action.delay === 1 ? 1 : 0;
+}
+
+export function actionMoveBeats(action: ArenaAction | null | undefined): number {
+  if (action?.type === 'walk') return walkDelay(action) + action.path.length;
+  if (action?.type === 'stay') return 1;
+  return 0;
 }
 
 function chebyshevDistance(a: Cell, b: Cell): number {
@@ -153,10 +214,10 @@ function isWithinOneSquare(cell: Cell, other: Cell): boolean {
   return chebyshevDistance(cell, other) <= 1;
 }
 
-export function generateMapObjects(playerPositions: Cell[]): Cell[] {
+export function generateMapObjects(playerPositions: Cell[], carton: CartonSpec): Cell[] {
   const candidates: Cell[] = [];
-  for (let row = 0; row < BOARD_SIZE; row += 1) {
-    for (let col = 0; col < BOARD_SIZE; col += 1) {
+  for (let row = 0; row < carton.rows; row += 1) {
+    for (let col = 0; col < carton.cols; col += 1) {
       const cell = { row, col };
       const tooClose = playerPositions.some((pos) => isWithinOneSquare(cell, pos));
       if (!tooClose) candidates.push(cell);
@@ -165,7 +226,7 @@ export function generateMapObjects(playerPositions: Cell[]): Cell[] {
 
   let pool = [...candidates];
   const objects: Cell[] = [];
-  const count = Math.min(OBSTACLE_COUNT, pool.length);
+  const count = Math.min(carton.obstacleCount, pool.length);
   for (let i = 0; i < count; i += 1) {
     if (pool.length === 0) break;
     const index = Math.floor(Math.random() * pool.length);
@@ -202,12 +263,12 @@ export function cellsEqual(a: Cell, b: Cell): boolean {
   return a.row === b.row && a.col === b.col;
 }
 
-export function isOnBoard(cell: Cell): boolean {
+export function isOnBoard(cell: Cell, carton: CartonSpec): boolean {
   return (
     cell.row >= 0 &&
-    cell.row < BOARD_SIZE &&
+    cell.row < carton.rows &&
     cell.col >= 0 &&
-    cell.col < BOARD_SIZE
+    cell.col < carton.cols
   );
 }
 
@@ -219,13 +280,14 @@ export function shotRayCells(
   from: Cell,
   dir: Direction,
   mapObjects: Cell[],
+  carton: CartonSpec,
   maxRange = Number.POSITIVE_INFINITY,
 ): Cell[] {
   const { dr, dc } = DIR_DELTA[dir];
   const cells: Cell[] = [];
   let row = from.row + dr;
   let col = from.col + dc;
-  while (isOnBoard({ row, col }) && cells.length < maxRange) {
+  while (isOnBoard({ row, col }, carton) && cells.length < maxRange) {
     const cell = { row, col };
     cells.push(cell);
     if (isObjectCell(cell, mapObjects)) break;
@@ -261,13 +323,13 @@ export function directionFromRay(from: Cell, to: Cell): Direction | null {
   return match ?? null;
 }
 
-export function cellsOnRay(from: Cell, end: Cell): Cell[] {
+export function cellsOnRay(from: Cell, end: Cell, carton: CartonSpec): Cell[] {
   const dir = directionFromRay(from, end);
   if (!dir) return cellsEqual(from, end) ? [] : [{ ...end }];
   const cells: Cell[] = [];
   let cursor = { ...from };
   const seen = new Set<string>();
-  while (isOnBoard(cursor) && !seen.has(`${cursor.row},${cursor.col}`)) {
+  while (isOnBoard(cursor, carton) && !seen.has(`${cursor.row},${cursor.col}`)) {
     if (!cellsEqual(cursor, from)) cells.push({ ...cursor });
     if (cellsEqual(cursor, end)) break;
     seen.add(`${cursor.row},${cursor.col}`);
@@ -277,29 +339,32 @@ export function cellsOnRay(from: Cell, end: Cell): Cell[] {
   return cells;
 }
 
-export function shotPlaybackCells(shot: {
-  weapon: WeaponKind;
-  from: Cell;
-  end: Cell;
-  dir: Direction;
-  fan?: Cell[];
-  splash?: Cell[];
-}): Cell[] {
-  const fan = weaponFanCells(shot.weapon, shot.from, shot.dir);
+export function shotPlaybackCells(
+  shot: {
+    weapon: WeaponKind;
+    from: Cell;
+    end: Cell;
+    dir: Direction;
+    fan?: Cell[];
+    splash?: Cell[];
+  },
+  carton: CartonSpec,
+): Cell[] {
+  const fan = weaponFanCells(shot.weapon, shot.from, shot.dir, carton, []);
   if (fan) {
     return shot.fan ?? fan;
   }
   if (shot.weapon === 'bomb') {
-    return [shot.end, ...(shot.splash ?? bombSplashCells(shot.end))];
+    return [shot.end, ...(shot.splash ?? bombSplashCells(shot.end, carton))];
   }
-  return cellsOnRay(shot.from, shot.end);
+  return cellsOnRay(shot.from, shot.end, carton);
 }
 
-export function neighbors8(cell: Cell): Cell[] {
+export function neighbors8(cell: Cell, carton: CartonSpec): Cell[] {
   return DIRECTIONS.map((dir) => {
     const delta = DIR_DELTA[dir];
     return { row: cell.row + delta.dr, col: cell.col + delta.dc };
-  }).filter(isOnBoard);
+  }).filter((step) => isOnBoard(step, carton));
 }
 
 export function plannedPositionAfter(start: Cell, action: ArenaAction | null): Cell {
@@ -309,17 +374,24 @@ export function plannedPositionAfter(start: Cell, action: ArenaAction | null): C
   return start;
 }
 
-function isCell(value: unknown): value is Cell {
+function isCell(value: unknown, carton: CartonSpec): value is Cell {
   if (!value || typeof value !== 'object') return false;
   const cell = value as Cell;
-  return Number.isInteger(cell.row) && Number.isInteger(cell.col) && isOnBoard(cell);
+  return Number.isInteger(cell.row) && Number.isInteger(cell.col) && isOnBoard(cell, carton);
 }
 
-function isWalkLegal(from: Cell, path: Cell[], mapObjects: Cell[]): boolean {
-  if (path.length < 1 || path.length > MAX_WALK_STEPS) return false;
+function isWalkLegal(
+  from: Cell,
+  path: Cell[],
+  mapObjects: Cell[],
+  carton: CartonSpec,
+  delay = 0,
+): boolean {
+  if (delay !== 0 && delay !== 1) return false;
+  if (path.length < 1 || path.length + delay > MAX_WALK_STEPS) return false;
   let current = from;
   for (const step of path) {
-    if (!isOnBoard(step) || isObjectCell(step, mapObjects) || !isAdjacent8(current, step)) {
+    if (!isOnBoard(step, carton) || isObjectCell(step, mapObjects) || !isAdjacent8(current, step)) {
       return false;
     }
     current = step;
@@ -327,16 +399,27 @@ function isWalkLegal(from: Cell, path: Cell[], mapObjects: Cell[]): boolean {
   return true;
 }
 
-function parseAction(value: unknown): ArenaAction | null {
+function parseAction(value: unknown, carton: CartonSpec): ArenaAction | null {
   if (!value || typeof value !== 'object') return null;
   const action = value as ArenaAction;
   if (action.type === 'stay') return { type: 'stay' };
   if (action.type === 'shoot' && isWeaponKind(action.weapon) && isDirection(action.dir)) {
     if (isCardinalWeapon(action.weapon) && !isCardinalDir(action.dir)) return null;
-    return { type: 'shoot', weapon: action.weapon, dir: action.dir };
+    const parsed: ArenaAction = { type: 'shoot', weapon: action.weapon, dir: action.dir };
+    if (action.weapon === 'bomb') {
+      const steps = action.steps;
+      if (steps !== undefined) {
+        if (!Number.isInteger(steps) || steps < 1 || steps > WEAPON_STATS.bomb.range) return null;
+        parsed.steps = steps;
+      }
+    }
+    return parsed;
   }
-  if (action.type === 'walk' && Array.isArray(action.path) && action.path.every(isCell)) {
-    return { type: 'walk', path: action.path.map((cell) => ({ row: cell.row, col: cell.col })) };
+  if (action.type === 'walk' && Array.isArray(action.path) && action.path.every((cell) => isCell(cell, carton))) {
+    const delay = action.delay;
+    if (delay !== undefined && delay !== 0 && delay !== 1) return null;
+    const path = action.path.map((cell) => ({ row: cell.row, col: cell.col }));
+    return delay === 1 ? { type: 'walk', path, delay: 1 } : { type: 'walk', path };
   }
   return null;
 }
@@ -351,6 +434,7 @@ export function parseAndValidatePlan(
   actions: unknown,
   cardIds: unknown,
   mapObjects: Cell[],
+  carton: CartonSpec,
 ): [ArenaAction, ArenaAction] | null {
   if (!isAlive(player) || !Array.isArray(actions) || actions.length !== 2) return null;
   if (!Array.isArray(cardIds) || cardIds.length !== 2) return null;
@@ -363,15 +447,15 @@ export function parseAndValidatePlan(
   if (!firstCard || !secondCard) return null;
   if (firstId === secondId && !isReusableCard(firstCard)) return null;
 
-  const first = parseAction(actions[0]);
-  const second = parseAction(actions[1]);
+  const first = parseAction(actions[0], carton);
+  const second = parseAction(actions[1], carton);
   if (!first || !second) return null;
   if (!actionMatchesCard(first, firstCard) || !actionMatchesCard(second, secondCard)) return null;
 
   let position = { row: player.row, col: player.col };
   for (const action of [first, second]) {
     if (action.type === 'walk') {
-      if (!isWalkLegal(position, action.path, mapObjects)) return null;
+      if (!isWalkLegal(position, action.path, mapObjects, carton, walkDelay(action))) return null;
       position = action.path[action.path.length - 1];
     }
   }
@@ -395,6 +479,7 @@ export function completePartialPlan(
   actions: [ArenaAction | null, ArenaAction | null],
   cardIds: [string | null, string | null],
   mapObjects: Cell[],
+  carton: CartonSpec,
 ): { cardIds: [string, string]; actions: [ArenaAction, ArenaAction] } | null {
   const resolved: [ArenaAction, ArenaAction] = [{ type: 'stay' }, { type: 'stay' }];
   let position = { row: player.row, col: player.col };
@@ -403,7 +488,7 @@ export function completePartialPlan(
     if (action.type === 'walk') {
       if (
         cardForAction(player, action, cardIds[index]) &&
-        isWalkLegal(position, action.path, mapObjects)
+        isWalkLegal(position, action.path, mapObjects, carton, walkDelay(action))
       ) {
         resolved[index] = action;
         position = action.path[action.path.length - 1];
@@ -423,6 +508,7 @@ export function completePartialPlan(
     resolved,
     [firstCard.id, secondCard.id],
     mapObjects,
+    carton,
   );
   if (!plan) return null;
   return { cardIds: [firstCard.id, secondCard.id], actions: plan };
@@ -456,8 +542,13 @@ export function emptyArenaFields(): Pick<
 }
 
 export function startArenaMatch(state: GameState): GameState {
+  const carton = cartonSpec(state.cartonType);
+  const seated = [...state.players].sort((a, b) => a.joinOrder - b.joinOrder);
+  const startById = new Map(
+    seated.map((player, index) => [player.id, carton.starts[index] ?? carton.starts[0]]),
+  );
   const players = state.players.map((player) => {
-    const corner = START_CORNERS[player.joinOrder] ?? START_CORNERS[0];
+    const corner = startById.get(player.id) ?? carton.starts[0];
     return {
       ...player,
       hp: STARTING_HP,
@@ -468,7 +559,10 @@ export function startArenaMatch(state: GameState): GameState {
       hand: dealHand(null),
     };
   });
-  const mapObjects = generateMapObjects(players.map((player) => ({ row: player.row, col: player.col })));
+  const mapObjects = generateMapObjects(
+    players.map((player) => ({ row: player.row, col: player.col })),
+    carton,
+  );
 
   return {
     ...state,
@@ -577,13 +671,14 @@ function fireShot(
   shooterId: string,
   mapObjects: Cell[],
   maxRange: number,
+  carton: CartonSpec,
 ): { end: Cell; hit?: Player } {
   const { dr, dc } = DIR_DELTA[dir];
   let row = from.row + dr;
   let col = from.col + dc;
   let end = from;
   let steps = 0;
-  while (isOnBoard({ row, col }) && steps < maxRange) {
+  while (isOnBoard({ row, col }, carton) && steps < maxRange) {
     end = { row, col };
     steps += 1;
     if (isObjectCell(end, mapObjects)) return { end };
@@ -717,12 +812,13 @@ export function pickPresentSpawn(
   players: Player[],
   mapObjects: Cell[],
   presents: Cell[],
+  carton: CartonSpec,
 ): Cell | null {
-  if (presents.length >= MAX_PRESENTS) return null;
+  if (presents.length >= carton.maxPresents) return null;
   const adjacent: Cell[] = [];
   const seen = new Set<string>();
   for (const player of living(players)) {
-    for (const cell of neighbors8(player)) {
+    for (const cell of neighbors8(player, carton)) {
       const key = `${cell.row},${cell.col}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -734,8 +830,8 @@ export function pickPresentSpawn(
       ? adjacent
       : (() => {
           const open: Cell[] = [];
-          for (let row = 0; row < BOARD_SIZE; row += 1) {
-            for (let col = 0; col < BOARD_SIZE; col += 1) {
+          for (let row = 0; row < carton.rows; row += 1) {
+            for (let col = 0; col < carton.cols; col += 1) {
               const cell = { row, col };
               if (!isPresentBlocked(cell, players, mapObjects, presents)) open.push(cell);
             }
@@ -750,9 +846,10 @@ export function spawnEndOfTurnPresent(
   players: Player[],
   mapObjects: Cell[],
   presents: Cell[],
+  carton: CartonSpec,
 ): Cell[] {
   const next = presents.map((cell) => ({ ...cell }));
-  const spawned = pickPresentSpawn(players, mapObjects, next);
+  const spawned = pickPresentSpawn(players, mapObjects, next, carton);
   if (!spawned) return next;
   return [...next, spawned];
 }
@@ -793,6 +890,7 @@ export function resolveRound(
   mapObjects: Cell[],
   eggStains: Cell[] = [],
   presents: Cell[] = [],
+  carton: CartonSpec,
 ): ResolveResult {
   let nextPlayers = players.map((player) => ({ ...player }));
   const timeline: PlaybackEvent[] = [];
@@ -811,17 +909,109 @@ export function resolveRound(
 
     timeline.push({ type: 'actionStart', actionIndex });
 
-    const beatCount = Math.max(
-      1,
-      ...actors.map((player) => {
-        const action = plans.get(player.id)?.[actionIndex];
-        return action?.type === 'walk' ? action.path.length : 1;
-      }),
+    const moveBeats = Math.max(
+      0,
+      ...actors.map((player) => actionMoveBeats(plans.get(player.id)?.[actionIndex])),
     );
     const walkNext = new Map<string, number>();
     const walkStopped = new Set<string>();
 
-    for (let beat = 0; beat < beatCount; beat += 1) {
+    const fireShots = () => {
+      const snapshot = nextPlayers.map((player) => ({ ...player }));
+      const hits = new Map<string, number>();
+
+      for (const player of living(snapshot)) {
+        const action = plans.get(player.id)?.[actionIndex];
+        if (action?.type !== 'shoot') continue;
+        const from = { row: player.row, col: player.col };
+
+        const fan = weaponFanCells(action.weapon, from, action.dir, carton, mapObjects);
+        if (fan) {
+          const struck = fan
+            .map((cell) => occupantAt(snapshot, cell, player.id))
+            .filter((target): target is Player => Boolean(target));
+          const delta = DIR_DELTA[action.dir];
+          const second = { row: from.row + delta.dr * 2, col: from.col + delta.dc * 2 };
+          const tip =
+            action.weapon === 'flamethrower' && isOnBoard(second, carton)
+              ? second
+              : (fan[1] ?? fan[0] ?? from);
+          timeline.push({
+            type: 'shot',
+            shooterId: player.id,
+            weapon: action.weapon,
+            dir: action.dir,
+            from,
+            end: tip,
+            fan,
+            hitPlayerId: struck[0]?.id,
+          });
+          for (const target of struck) {
+            addHit(hits, target.id, WEAPON_STATS[action.weapon].damage);
+          }
+          continue;
+        }
+
+        if (action.weapon === 'bomb') {
+          const stats = WEAPON_STATS.bomb;
+          const steps = action.steps ?? stats.range;
+          const end = cellAlongRay(from, action.dir, steps, carton);
+          const splash = bombSplashCells(end, carton, mapObjects);
+          const landed = occupantAt(snapshot, end);
+          timeline.push({
+            type: 'shot',
+            shooterId: player.id,
+            weapon: action.weapon,
+            dir: action.dir,
+            from,
+            end,
+            splash,
+            hitPlayerId: landed?.id,
+          });
+          if (landed) addHit(hits, landed.id, stats.damage);
+          for (const cell of splash) {
+            const splashed = occupantAt(snapshot, cell);
+            if (splashed) addHit(hits, splashed.id, stats.damage);
+          }
+          continue;
+        }
+
+        const stats = WEAPON_STATS[action.weapon];
+        const { end, hit } = fireShot(
+          snapshot,
+          from,
+          action.dir,
+          player.id,
+          mapObjects,
+          stats.range,
+          carton,
+        );
+        timeline.push({
+          type: 'shot',
+          shooterId: player.id,
+          weapon: action.weapon,
+          dir: action.dir,
+          from,
+          end,
+          hitPlayerId: hit?.id,
+        });
+        if (hit) addHit(hits, hit.id, stats.damage);
+      }
+
+      if (hits.size === 0) return;
+      nextPlayers = nextPlayers.map((player) => {
+        const damage = hits.get(player.id);
+        if (!damage) return player;
+        const hpAfter = Math.max(0, player.hp - damage);
+        timeline.push({ type: 'hit', playerId: player.id, hpAfter });
+        if (hpAfter === 0 && player.hp > 0) {
+          timeline.push({ type: 'death', playerId: player.id });
+        }
+        return { ...player, hp: hpAfter };
+      });
+    };
+
+    for (let beat = 0; beat < moveBeats; beat += 1) {
       timeline.push({ type: 'beat', actionIndex, beat });
       const movers = living(nextPlayers);
       const intents: Intent[] = movers.map((player) => {
@@ -830,9 +1020,17 @@ export function resolveRound(
         if (action?.type !== 'walk' || walkStopped.has(player.id)) {
           return { id: player.id, from, to: from };
         }
+        if (beat < walkDelay(action)) {
+          return { id: player.id, from, to: from };
+        }
         const nextIndex = walkNext.get(player.id) ?? 0;
         const step = action.path[nextIndex];
-        if (!step || !isOnBoard(step) || isObjectCell(step, mapObjects) || !isAdjacent8(from, step)) {
+        if (
+          !step ||
+          !isOnBoard(step, carton) ||
+          isObjectCell(step, mapObjects) ||
+          !isAdjacent8(from, step)
+        ) {
           walkStopped.add(player.id);
           return { id: player.id, from, to: from };
         }
@@ -852,86 +1050,8 @@ export function resolveRound(
       }
 
       takePresents();
-
-      if (beat !== 0) continue;
-
-      const snapshot = nextPlayers.map((player) => ({ ...player }));
-      const hits = new Map<string, number>();
-
-      for (const player of living(snapshot)) {
-        const action = plans.get(player.id)?.[actionIndex];
-        if (action?.type !== 'shoot') continue;
-        const from = { row: player.row, col: player.col };
-
-        const fan = weaponFanCells(action.weapon, from, action.dir);
-        if (fan) {
-          const struck = fan
-            .map((cell) => occupantAt(snapshot, cell, player.id))
-            .filter((target): target is Player => Boolean(target));
-          const delta = DIR_DELTA[action.dir];
-          const second = { row: from.row + delta.dr * 2, col: from.col + delta.dc * 2 };
-          const tip =
-            action.weapon === 'flamethrower' && isOnBoard(second)
-              ? second
-              : (fan[1] ?? fan[0] ?? from);
-          timeline.push({
-            type: 'shot',
-            shooterId: player.id,
-            weapon: action.weapon,
-            dir: action.dir,
-            from,
-            end: tip,
-            fan,
-            hitPlayerId: struck[0]?.id,
-          });
-          for (const target of struck) {
-            addHit(hits, target.id, WEAPON_STATS[action.weapon].damage);
-          }
-          continue;
-        }
-
-        const stats = WEAPON_STATS[action.weapon];
-        const { end, hit } = fireShot(
-          snapshot,
-          from,
-          action.dir,
-          player.id,
-          mapObjects,
-          stats.range,
-        );
-        const splash = action.weapon === 'bomb' ? bombSplashCells(end) : undefined;
-        timeline.push({
-          type: 'shot',
-          shooterId: player.id,
-          weapon: action.weapon,
-          dir: action.dir,
-          from,
-          end,
-          splash,
-          hitPlayerId: hit?.id,
-        });
-        if (hit) addHit(hits, hit.id, stats.damage);
-        if (splash) {
-          for (const cell of splash) {
-            const splashed = occupantAt(snapshot, cell);
-            if (splashed) addHit(hits, splashed.id, stats.damage);
-          }
-        }
-      }
-
-      if (hits.size > 0) {
-        nextPlayers = nextPlayers.map((player) => {
-          const damage = hits.get(player.id);
-          if (!damage) return player;
-          const hpAfter = Math.max(0, player.hp - damage);
-          timeline.push({ type: 'hit', playerId: player.id, hpAfter });
-          if (hpAfter === 0 && player.hp > 0) {
-            timeline.push({ type: 'death', playerId: player.id });
-          }
-          return { ...player, hp: hpAfter };
-        });
-      }
     }
+    fireShots();
   }
 
   return {
@@ -946,9 +1066,10 @@ export function resolveRound(
 export function applyResolvedRound(state: GameState, result: ResolveResult): GameState {
   const roundStart = snapshotTokens(state.players);
   const startPresents = (state.presents ?? []).map((cell) => ({ ...cell }));
+  const carton = cartonSpec(state.cartonType);
   const presents =
     result.outcome.kind === 'none'
-      ? spawnEndOfTurnPresent(result.players, state.mapObjects, result.presents)
+      ? spawnEndOfTurnPresent(result.players, state.mapObjects, result.presents, carton)
       : result.presents;
   return {
     ...state,
@@ -1030,5 +1151,6 @@ export function formatAction(action: ArenaAction | null): string {
   if (!action) return 'Pick one';
   if (action.type === 'stay') return 'Sit tight';
   if (action.type === 'shoot') return `${formatWeapon(action.weapon)} ${action.dir}`;
+  if (walkDelay(action)) return `Sit, walk ${action.path.length}`;
   return `Walk ${action.path.length}`;
 }
