@@ -8,6 +8,7 @@ on:
     types: [completed]
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -44,3 +45,5 @@ jobs:
           gh api -X DELETE \
             "repos/${{ github.repository }}/git/refs/heads/${HEAD_REF}" \
             || echo "Branch ${HEAD_REF} already deleted."
+          echo "Deploying merged main to GitHub Pages"
+          gh workflow run "Deploy to GitHub Pages" --ref main
