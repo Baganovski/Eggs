@@ -12,7 +12,7 @@ interface RoomShellProps {
   isHost: boolean;
   onStart: () => void;
   onAddBot: () => void;
-  onRemoveBot: (playerId: string) => void;
+  onKick: (playerId: string) => void;
   onSetCartonType: (cartonType: CartonType) => void;
   onLeave: () => void;
   onSubmitPlan: (plan: { cardIds: [string, string]; actions: [ArenaAction, ArenaAction] }) => void;
@@ -23,18 +23,9 @@ interface RoomShellProps {
   onDismissError: () => void;
 }
 
-function PanelHeader({
-  eyebrow,
-  title,
-  copy,
-}: {
-  eyebrow: string;
-  title: string;
-  copy: string;
-}) {
+function PanelHeader({ title, copy }: { title: string; copy: string }) {
   return (
     <header className="panel-header">
-      <p className="eyebrow">{eyebrow}</p>
       <h2>{title}</h2>
       <p className="panel-copy">{copy}</p>
     </header>
@@ -42,9 +33,8 @@ function PanelHeader({
 }
 
 const lobbyHeader = {
-  eyebrow: 'Incubating',
   title: 'The carton is filling',
-  copy: 'Share the nest code, or add a bot. The hen picks a carton, then starts the scramble.',
+  copy: 'Share the nest code, or add a bot. The host picks a carton, then starts the scramble.',
 };
 
 export function RoomShell({
@@ -54,7 +44,7 @@ export function RoomShell({
   isHost,
   onStart,
   onAddBot,
-  onRemoveBot,
+  onKick,
   onSetCartonType,
   onLeave,
   onSubmitPlan,
@@ -88,8 +78,8 @@ export function RoomShell({
               }))}
               connectedCount={connectedCount}
               maxSeats={carton.maxPlayers}
-              canManageBots={isHost && phase === 'lobby'}
-              onRemoveBot={onRemoveBot}
+              canKick={isHost && phase === 'lobby'}
+              onKick={onKick}
             />
 
             <CartonPicker
@@ -118,7 +108,7 @@ export function RoomShell({
                 </button>
               </div>
             ) : (
-              <p className="waiting-host">Waiting on the hen.</p>
+              <p className="waiting-host">Waiting on the host.</p>
             )}
           </section>
         ) : (

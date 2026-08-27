@@ -3,8 +3,8 @@ import { PlayerToken } from './PlayerToken';
 interface LobbyRosterProps {
   connectedCount: number;
   maxSeats: number;
-  canManageBots: boolean;
-  onRemoveBot: (playerId: string) => void;
+  canKick: boolean;
+  onKick: (playerId: string) => void;
   players: Array<{
     id: string;
     name: string;
@@ -20,8 +20,8 @@ export function LobbyRoster({
   players,
   connectedCount,
   maxSeats,
-  canManageBots,
-  onRemoveBot,
+  canKick,
+  onKick,
 }: LobbyRosterProps) {
   const seats = Array.from({ length: maxSeats }, (_, index) => players[index] ?? null);
 
@@ -44,16 +44,16 @@ export function LobbyRoster({
                   {player.isYou ? ' (you)' : ''}
                 </span>
                 <span className="seat-tags">
-                  {player.isHost && <span className="tag">hen</span>}
+                  {player.isHost && <span className="tag">host</span>}
                   {player.isBot && <span className="tag tag-muted">bot</span>}
                   {!player.connected && <span className="tag tag-muted">rolled off</span>}
-                  {canManageBots && player.isBot && (
+                  {canKick && !player.isYou && (player.isBot || !player.connected) && (
                     <button
                       type="button"
                       className="seat-remove"
-                      onClick={() => onRemoveBot(player.id)}
+                      onClick={() => onKick(player.id)}
                     >
-                      Un-nest
+                      Kick
                     </button>
                   )}
                 </span>

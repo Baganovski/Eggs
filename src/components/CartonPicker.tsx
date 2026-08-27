@@ -51,7 +51,7 @@ function MiniCarton({ type }: { type: CartonType }) {
             width={cell}
             height={cell}
             rx="1.6"
-            fill={(row + col) % 2 === 0 ? '#efe6d6' : '#f3f1f4'}
+            fill={(row + col) % 2 === 0 ? '#e8d7c0' : '#f6f0e4'}
             stroke="#111"
             strokeWidth="1.5"
           />
@@ -95,7 +95,7 @@ export function CartonPicker({ value, playerCount, isHost, onChange }: CartonPic
           );
         })}
       </div>
-      {!isHost && <p className="carton-picker-note">The hen picks the carton.</p>}
+      {!isHost && <p className="carton-picker-note">The host picks the carton.</p>}
     </fieldset>
   );
 }

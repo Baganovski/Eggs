@@ -1,7 +1,7 @@
 :root {
   color-scheme: light;
-  --paper: #e6e4e8;
-  --cream: #f3f1f4;
+  --paper: #b89a7c;
+  --cream: #f6f0e4;
   --ink: #111111;
   --cyan: #5ee0f0;
   --yellow: #ffe14a;
@@ -9,7 +9,9 @@
   --lime: #7dde6a;
   --orange: #ff8a3d;
   --hit: #ff5a3c;
+  --light-red: #ffb0a0;
   --shadow: 4px 4px 0 #111;
+  --room-column: min(480px, calc(100% - 32px));
   font-family: 'DM Sans', system-ui, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -69,8 +71,7 @@ h2,
 h3,
 .brand,
 .join-code-value,
-.arena-kicker,
-.eyebrow {
+.arena-kicker {
   font-family: 'Archivo Black', 'DM Sans', sans-serif;
   font-weight: 400;
 }
@@ -95,9 +96,8 @@ h3,
 
 .home-main,
 .room-main {
-  width: min(720px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 56px 0 36px;
+  padding: 72px 0 48px;
   position: relative;
   z-index: 1;
   flex: 1 1 auto;
@@ -105,23 +105,25 @@ h3,
 }
 
 .home-main {
+  width: min(720px, calc(100% - 56px));
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
 
 .room-main {
+  width: var(--room-column);
   display: flex;
   flex-direction: column;
 }
 
 .room-main:not(.is-arena) {
-  justify-content: center;
+  justify-content: flex-start;
+  padding: 20px 0 48px;
 }
 
 .room-main.is-arena {
-  width: min(640px, calc(100% - 16px));
-  padding: 12px 0 16px;
+  padding: 16px 0 20px;
 }
 
 .home-hero {
@@ -152,11 +154,11 @@ h3,
   margin: 0 0 10px;
   padding-bottom: 0.28em;
   font-family: 'Titan One', 'Archivo Black', sans-serif;
-  font-size: 96px;
+  font-size: 108px;
   font-weight: 400;
   letter-spacing: 0.04em;
   line-height: 0.85;
-  transform: rotate(-12deg);
+  transform: rotate(-8deg);
   color: #f6c7d4;
   -webkit-text-stroke: 16px #111;
   paint-order: stroke fill;
@@ -225,9 +227,59 @@ h2 {
   display: block;
   width: min(300px, 84vw);
   height: auto;
-  margin: 0 auto;
+  margin: 0 auto 16px;
   overflow: visible;
   position: relative;
+}
+
+.home-egg-fidget {
+  transform-box: view-box;
+  animation: home-egg-fidget 2.4s steps(1, jump-end) infinite;
+}
+
+@keyframes home-egg-fidget {
+  0%,
+  100% {
+    transform: rotate(0deg) translateY(0);
+  }
+
+  12.5% {
+    transform: rotate(-7deg) translateY(-5px);
+  }
+
+  25% {
+    transform: rotate(6deg) translateY(0);
+  }
+
+  37.5% {
+    transform: rotate(-4deg) translateY(-7px);
+  }
+
+  50% {
+    transform: rotate(0deg) translateY(0);
+  }
+
+  62.5% {
+    transform: rotate(8deg) translateY(-4px);
+  }
+
+  75% {
+    transform: rotate(-6deg) translateY(-1px);
+  }
+
+  87.5% {
+    transform: rotate(3deg) translateY(-6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-egg-fidget,
+  .arena-token.is-hatched,
+  .arena-token.is-hatched .chick-body,
+  .arena-token.is-hatched .chick-wing-l,
+  .arena-token.is-hatched .chick-wing-r {
+    animation: none;
+  }
 }
 
 .panel {
@@ -238,16 +290,13 @@ h2 {
   box-shadow: var(--shadow);
 }
 
-.panel-header {
-  margin-bottom: 20px;
-  text-align: center;
+.home-panel {
+  margin-block: 8px;
 }
 
-.eyebrow {
-  margin: 0 0 8px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-size: 0.78rem;
+.panel-header {
+  margin-bottom: 16px;
+  text-align: center;
 }
 
 .home-form {
@@ -476,6 +525,10 @@ h2 {
   transform: none;
 }
 
+.seat-egg .arena-token svg {
+  transform: none;
+}
+
 .roster-seat:has(.seat-egg) {
   justify-content: flex-start;
 }
@@ -502,7 +555,7 @@ h2 {
 }
 
 .tag {
-  background: var(--lavender);
+  background: var(--yellow);
   border: 2px solid var(--ink);
   border-radius: 999px;
   padding: 2px 8px;
@@ -518,7 +571,7 @@ h2 {
 
 .seat-remove {
   border: 2px solid var(--ink);
-  background: var(--yellow);
+  background: var(--light-red);
   border-radius: 999px;
   padding: 2px 8px;
   font-size: 0.72rem;
@@ -536,7 +589,7 @@ h2 {
 .game-panel .btn,
 .arena .btn {
   width: 100%;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .carton-picker {
@@ -640,11 +693,9 @@ h2 {
 
 .lobby-panel,
 .game-panel {
-  min-height: 0;
-}
-
-.lobby-panel {
   width: 100%;
+  align-self: stretch;
+  min-height: 0;
 }
 
 .game-panel {
@@ -658,7 +709,10 @@ h2 {
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  gap: 10px;
+  gap: 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 6px 6px;
 }
 
 .arena-status-row {
@@ -692,7 +746,7 @@ h2 {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 6px;
+  gap: 8px;
   flex: 0 0 auto;
 }
 
@@ -739,20 +793,20 @@ h2 {
 }
 
 .arena-stage {
-  flex: 1 1 auto;
-  min-height: 16rem;
+  flex: 0 0 auto;
+  min-height: 0;
   min-width: 0;
   width: 100%;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
   justify-items: stretch;
-  align-items: stretch;
-  gap: 6px;
+  align-items: start;
+  gap: 10px;
 }
 
 .arena-timer {
-  width: min(100%, calc(3.75rem * var(--board-cols, 7) + 18px));
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
   height: 10px;
   border: 3px solid var(--ink);
   border-radius: 999px;
@@ -764,9 +818,6 @@ h2 {
   min-height: 0;
   min-width: 0;
   width: 100%;
-  container-type: size;
-  display: grid;
-  place-items: center;
 }
 
 .arena-timer-fill {
@@ -805,45 +856,14 @@ h2 {
 .arena-board-wrap {
   --board-pad: 6px;
   --board-stroke: 3px;
-  --board-frame: calc((var(--board-pad) + var(--board-stroke)) * 2);
-  --board-fit: calc(var(--board-frame) + 4px);
-  --board-cell: 3.75rem;
-  width: min(100%, calc(var(--board-cell) * var(--board-cols, 7) + var(--board-frame)));
-  max-height: 100%;
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
   padding: var(--board-pad);
   background: #fff;
   border: var(--board-stroke) solid var(--ink);
   border-radius: 18px;
   box-shadow: var(--shadow);
   overflow: visible;
-}
-
-.arena-board-wrap.is-halfDozen {
-  --board-cell: 6.5rem;
-}
-
-.arena-stage:has(.is-halfDozen) {
-  min-height: 10rem;
-}
-
-.arena-stage:has(.is-halfDozen) .arena-timer {
-  width: min(100%, calc(6.5rem * var(--board-cols, 3) + 18px));
-}
-
-@supports (width: min(100cqw, 100cqh)) {
-  .arena-board-wrap {
-    width: min(
-      100%,
-      100cqw,
-      calc(
-        (100cqh - var(--board-fit)) * var(--board-cols, 7) / var(--board-rows, 7) +
-          var(--board-frame)
-      ),
-      calc(var(--board-cell) * var(--board-cols, 7) + var(--board-frame))
-    );
-    max-height: none;
-  }
 }
 
 .arena-board {
@@ -873,7 +893,7 @@ h2 {
 }
 
 .arena-cell.shade {
-  background: #efe6d6;
+  background: #ebe3d2;
 }
 
 .arena-cell.is-last-col {
@@ -900,8 +920,21 @@ h2 {
   background: var(--yellow);
 }
 
-.arena-cell.is-valid {
-  background: var(--lime);
+.arena-cell.is-valid::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border: 3px dotted var(--ink);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.arena-cell.on-path.is-valid::after,
+.arena-cell.on-path-muted.is-valid::after,
+.arena-cell.on-aim.is-valid::after,
+.arena-cell.on-aim-muted.is-valid::after,
+.arena-cell.on-beam.is-valid::after {
+  content: none;
 }
 
 .arena-cell.is-origin {
@@ -914,11 +947,11 @@ h2 {
 }
 
 .arena-cell.has-block {
-  background: #d7cbb6;
+  background: #c9ae8a;
 }
 
 .arena-cell.has-block.shade {
-  background: #ccbfa8;
+  background: #bb9d78;
 }
 
 .arena-block {
@@ -937,7 +970,7 @@ h2 {
 
 .arena-present {
   position: absolute;
-  inset: 12%;
+  inset: 2%;
   pointer-events: none;
   z-index: 1;
 }
@@ -969,11 +1002,11 @@ h2 {
   justify-content: center;
   color: var(--ink);
   pointer-events: none;
-  transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%))
-    rotate(var(--egg-tilt, 0deg));
+  transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%));
   transform-origin: 50% 92%;
   transition: transform 180ms ease-out;
   z-index: 2;
+  filter: drop-shadow(2px 2px 0 #111);
 }
 
 .arena-token svg {
@@ -981,10 +1014,17 @@ h2 {
   height: 100%;
   display: block;
   overflow: visible;
+  transform: rotate(var(--egg-tilt, 0deg));
+  transform-origin: 50% 92%;
+  transition: transform 180ms ease-out;
+}
+
+.arena-token.is-idle-snap svg {
+  transition: none;
 }
 
 .arena-token.is-you {
-  filter: drop-shadow(0 0 0 2px #fff);
+  filter: drop-shadow(0 0 0 2px #fff) drop-shadow(2px 2px 0 #111);
 }
 
 .arena-token.is-down {
@@ -996,22 +1036,25 @@ h2 {
   height: auto;
   align-items: center;
   transform-origin: 50% 50%;
-  filter: none;
+  filter: drop-shadow(2px 2px 0 #111);
   opacity: 1;
 }
 
 .arena-token.is-hatched {
   z-index: 4;
   transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%))
-    rotate(0deg)
     scale(1.04);
-  animation: chick-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: chick-pop 360ms steps(1, jump-end);
+}
+
+.arena-token.is-hatched svg {
+  transform: none;
 }
 
 .arena-token.is-hatched .chick-body {
   transform-box: fill-box;
   transform-origin: 50% 100%;
-  animation: chick-hop 700ms ease-in-out 420ms infinite;
+  animation: chick-hop 1.8s steps(1, jump-end) 360ms infinite;
 }
 
 .arena-token.is-hatched .chick-wing {
@@ -1020,24 +1063,27 @@ h2 {
 
 .arena-token.is-hatched .chick-wing-l {
   transform-origin: 100% 50%;
-  animation: chick-flap-l 700ms ease-in-out 420ms infinite;
+  animation: chick-flap-l 1.8s steps(1, jump-end) 360ms infinite;
 }
 
 .arena-token.is-hatched .chick-wing-r {
   transform-origin: 0% 50%;
-  animation: chick-flap-r 700ms ease-in-out 420ms infinite;
+  animation: chick-flap-r 1.8s steps(1, jump-end) 360ms infinite;
 }
 
 @keyframes chick-pop {
   0% {
     transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%))
-      rotate(var(--egg-tilt, 0deg))
       scale(0.72);
+  }
+
+  50% {
+    transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%))
+      scale(1.14);
   }
 
   100% {
     transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%))
-      rotate(0deg)
       scale(1.04);
   }
 }
@@ -1045,19 +1091,27 @@ h2 {
 @keyframes chick-hop {
   0%,
   100% {
-    transform: translateY(0) scale(1, 1);
+    transform: translateY(0) rotate(0deg) scale(1, 1);
   }
 
-  12% {
-    transform: translateY(2px) scale(1.08, 0.9);
+  16.66% {
+    transform: translateY(3px) rotate(-8deg) scale(1.1, 0.86);
   }
 
-  42% {
-    transform: translateY(-14px) scale(0.94, 1.08);
+  33.33% {
+    transform: translateY(-16px) rotate(7deg) scale(0.94, 1.08);
   }
 
-  78% {
-    transform: translateY(1px) scale(1.06, 0.94);
+  50% {
+    transform: translateY(0) rotate(-3deg) scale(1.04, 0.94);
+  }
+
+  66.66% {
+    transform: translateY(-12px) rotate(-7deg) scale(0.96, 1.06);
+  }
+
+  83.33% {
+    transform: translateY(2px) rotate(6deg) scale(1.08, 0.9);
   }
 }
 
@@ -1067,8 +1121,24 @@ h2 {
     transform: rotate(8deg);
   }
 
-  42% {
-    transform: rotate(-38deg);
+  16.66% {
+    transform: rotate(16deg);
+  }
+
+  33.33% {
+    transform: rotate(-40deg);
+  }
+
+  50% {
+    transform: rotate(10deg);
+  }
+
+  66.66% {
+    transform: rotate(-36deg);
+  }
+
+  83.33% {
+    transform: rotate(14deg);
   }
 }
 
@@ -1078,8 +1148,24 @@ h2 {
     transform: rotate(-8deg);
   }
 
-  42% {
-    transform: rotate(38deg);
+  16.66% {
+    transform: rotate(-16deg);
+  }
+
+  33.33% {
+    transform: rotate(40deg);
+  }
+
+  50% {
+    transform: rotate(-10deg);
+  }
+
+  66.66% {
+    transform: rotate(36deg);
+  }
+
+  83.33% {
+    transform: rotate(-14deg);
   }
 }
 
@@ -1101,38 +1187,36 @@ h2 {
 
 .arena-token.is-hit {
   transition: none;
+}
+
+.arena-token.is-hit svg {
+  transition: none;
   animation: egg-hit 220ms ease-out forwards;
 }
 
 @keyframes egg-hit {
   0% {
-    transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%))
-      rotate(var(--egg-tilt, 0deg)) scale(1, 1);
+    transform: rotate(var(--egg-tilt, 0deg)) scale(1, 1);
   }
 
   18% {
-    transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%))
-      rotate(calc(var(--egg-tilt, 0deg) - 12deg)) scale(1.14, 0.82);
+    transform: rotate(calc(var(--egg-tilt, 0deg) - 12deg)) scale(1.14, 0.82);
   }
 
   38% {
-    transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%))
-      rotate(calc(var(--egg-tilt, 0deg) + 12deg)) scale(1.08, 0.9);
+    transform: rotate(calc(var(--egg-tilt, 0deg) + 12deg)) scale(1.08, 0.9);
   }
 
   58% {
-    transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%))
-      rotate(calc(var(--egg-tilt, 0deg) - 10deg)) scale(1.04, 0.94);
+    transform: rotate(calc(var(--egg-tilt, 0deg) - 10deg)) scale(1.04, 0.94);
   }
 
   78% {
-    transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%))
-      rotate(calc(var(--egg-tilt, 0deg) + 6deg)) scale(1.02, 0.98);
+    transform: rotate(calc(var(--egg-tilt, 0deg) + 6deg)) scale(1.02, 0.98);
   }
 
   100% {
-    transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%))
-      rotate(var(--egg-tilt, 0deg)) scale(1, 1);
+    transform: rotate(var(--egg-tilt, 0deg)) scale(1, 1);
   }
 }
 
@@ -1181,7 +1265,7 @@ h2 {
 .arena-planner,
 .arena-outcome {
   display: grid;
-  gap: 8px;
+  gap: 12px;
   flex: 0 0 auto;
 }
 
@@ -1196,7 +1280,7 @@ h2 {
 .planner-tools {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 10px;
 }
 
 .hand-row,
@@ -1204,8 +1288,18 @@ h2 {
   grid-template-columns: 1fr 1fr 1fr;
 }
 
-.hand-row .plan-card {
+.hand-row .plan-card,
+.action-slot {
   min-width: 0;
+}
+
+.fit-text {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  line-height: 1.15;
 }
 
 .plan-card {
@@ -1257,7 +1351,17 @@ h2 {
 
 .planner-actions {
   display: grid;
-  gap: 8px;
+  gap: 10px;
+  padding: 0 0 4px;
+}
+
+.planner-actions .btn-primary {
+  filter: drop-shadow(4px 4px 0 #111);
+  box-shadow: none;
+}
+
+.planner-actions .btn-primary:disabled {
+  filter: none;
 }
 
 .planner-tools:not(:has(:nth-child(2))) {
@@ -1276,12 +1380,8 @@ h2 {
   box-shadow: var(--shadow);
 }
 
-.action-slot > span:last-child {
-  display: block;
+.action-slot > .fit-text {
   min-height: 1.2em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .action-slot:disabled {
@@ -1473,15 +1573,22 @@ h2 {
 @media (max-width: 600px) {
   .home-main,
   .room-main {
-    width: min(720px, calc(100% - 20px));
     padding: 16px 0 16px;
   }
 
   .home-main {
-    justify-content: flex-start;
+    width: min(720px, calc(100% - 48px));
+  }
+
+  .room-main {
+    width: calc(100% - 32px);
+  }
+
+  .home-main {
+    justify-content: center;
     gap: 18px;
-    padding-top: max(20px, env(safe-area-inset-top, 0px));
-    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    padding-top: max(56px, env(safe-area-inset-top, 0px));
+    padding-bottom: max(24px, env(safe-area-inset-bottom, 0px));
   }
 
   .home-hero {
@@ -1500,7 +1607,7 @@ h2 {
     position: relative;
     margin: 0 auto 6px;
     padding-bottom: 0.42em;
-    font-size: clamp(4.15rem, 21vw, 5.5rem);
+    font-size: clamp(4.5rem, 23vw, 6rem);
     -webkit-text-stroke: 14px #111;
     text-shadow: 4px 5px 0 #111;
   }
@@ -1512,7 +1619,7 @@ h2 {
 
   .home-lede {
     font-size: 1.2rem;
-    margin-top: -2px;
+    margin-top: 0;
   }
 
   .home-actions {
@@ -1595,16 +1702,15 @@ h2 {
   }
 
   .room-main.is-arena {
-    width: calc(100% - 12px);
-    padding: 8px 0 10px;
+    padding: 12px 0 14px;
   }
 
   .game-panel {
-    padding: 10px 10px 8px;
+    padding: 14px 12px 12px;
   }
 
   .arena {
-    gap: 6px;
+    gap: 10px;
   }
 
   .arena-kicker {
@@ -1612,7 +1718,7 @@ h2 {
   }
 
   .arena-hud {
-    gap: 2px;
+    gap: 6px;
   }
 
   .arena-hud-seat {
@@ -1640,14 +1746,14 @@ h2 {
 
   .arena-planner,
   .arena-outcome {
-    gap: 6px;
+    gap: 10px;
   }
 
   .action-slots,
   .hand-row,
   .mode-row,
   .planner-tools {
-    gap: 6px;
+    gap: 8px;
   }
 
   .plan-card,
@@ -1672,7 +1778,7 @@ h2 {
   }
 
   .planner-actions {
-    gap: 6px;
+    gap: 8px;
   }
 
   .planner-actions .btn,
