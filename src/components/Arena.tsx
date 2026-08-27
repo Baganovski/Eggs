@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import {
   cartonSpec,
   MAX_WALK_STEPS,
@@ -36,6 +44,7 @@ import {
   playerColor,
   shotPlaybackCells,
   shotRayCells,
+  validShootCells,
   walkDelay,
   weaponFanCells,
   WEAPON_STATS,
@@ -79,6 +88,39 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
   });
+}
+
+function FitText({ children }: { children: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const fit = () => {
+      el.style.fontSize = '';
+      const start = parseFloat(getComputedStyle(el).fontSize);
+      if (!Number.isFinite(start)) return;
+      let size = start;
+      const min = Math.max(10, start * 0.58);
+      while (el.scrollWidth > el.clientWidth + 0.5 && size > min) {
+        size -= 0.5;
+        el.style.fontSize = `${size}px`;
+      }
+    };
+
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    if (el.parentElement) observer.observe(el.parentElement);
+    return () => observer.disconnect();
+  }, [children]);
+
+  return (
+    <span ref={ref} className="fit-text">
+      {children}
+    </span>
+  );
 }
 
 function tokensFromState(state: GameState): Token[] {
@@ -130,11 +172,13 @@ function shotCaption(tokens: Token[], frame: PlaybackEvent[], actionIndex: numbe
 
 const WALK_STEPS_AFTER_SIT = 2;
 
-const PLANNER_HINT_WALK =
-  'Tap yourself to sit, then up to 2 squares to walk this move. Sitting only spends a beat on this move — the next move can still walk 3. Sit locks if you open the next move or lock in. Walk onto a present to unwrap a spare weapon.';
-
 const PLANNER_HINT_WALK_NO_PRESENT =
-  'Tap yourself to sit, then up to 2 squares to walk this move. Sitting only spends a beat on this move — the next move can still walk 3. Sit locks if you open the next move or lock in.';
+  'Walk up to 3 squares — or tap yourself to sit, then walk up to 2.';
+
+const PLANNER_HINT_WALK = `${PLANNER_HINT_WALK_NO_PRESENT} Walk onto a present for a spare.`;
+
+const PLANNER_HINT_SIZER =
+  'Tap north, east, south, or west. The flame hits two squares ahead, and the sides of the second square. An obstacle in front stops the rest. Two damage.';
 
 function walkAction(path: Cell[], delay = 0): ArenaAction {
   return delay === 1 ? { type: 'walk', path, delay: 1 } : { type: 'walk', path };
@@ -508,6 +552,10 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     canPlan && editingMove && walkPath.length < maxWalkFor(slot)
       ? neighbors8(walkTip, carton).filter((cell) => !isObjectCell(cell, state.mapObjects))
       : [];
+  const validShoot =
+    canPlan && selectedCard && selectedCard.kind !== 'move'
+      ? validShootCells(selectedCard.kind, origin, carton, state.mapObjects)
+      : [];
 
   const walkTones = useMemo(() => {
     const tones = new Map<string, OverlayTone>();
@@ -859,7 +907,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
           {watchingLast
             ? status || `Watching round ${state.lastReplay?.round ?? ''}`
             : planning
-              ? `${submittedCount}/${livingCount} egged`
+              ? `${submittedCount}/${livingCount} scrambled`
               : status || (replayDone ? 'Moves played out' : 'Watching the carton…')}
         </p>
       </div>
@@ -893,7 +941,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                 : player.hp <= 0
                   ? 'fried'
                   : planning && (player.planSubmitted || (player.isYou && localLocked))
-                    ? 'egged'
+                    ? 'scrambled'
                     : planning
                       ? 'thinking'
                       : player.isBot
@@ -931,7 +979,9 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
             const walkTone = showPlanOverlay ? walkTones.get(cellKey) : undefined;
             const aimTone = showPlanOverlay ? aimTones.get(cellKey) : undefined;
             const pathIndex = showPlanOverlay ? (beatNumbers.get(cellKey) ?? 0) : 0;
-            const isValid = validWalk.some((step) => cellsEqual(step, cell));
+            const isValid =
+              validWalk.some((step) => cellsEqual(step, cell)) ||
+              validShoot.some((step) => cellsEqual(step, cell));
             const isOrigin = canPlan && cellsEqual(origin, cell);
             const hasBlock = isObjectCell(cell, state.mapObjects);
             const hasPresent = presents.some((present) => cellsEqual(present, cell));
@@ -988,6 +1038,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                     isHatched={showOutcome && token.id === winnerId}
                     bump={bumps[token.id]}
                     tiltSeed={`${token.id}:${token.row}:${token.col}`}
+                    idle={token.hp > 0 && !showOutcome}
                   />
                 ))}
               </button>
@@ -1010,7 +1061,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                 onClick={() => goToSlot(index)}
               >
                 <span className="action-slot-label">Move {index + 1}</span>
-                <span>{formatAction(resolvedDraft[index])}</span>
+                <FitText>{formatAction(resolvedDraft[index])}</FitText>
               </button>
             ))}
           </div>
@@ -1033,7 +1084,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                     disabled
                   >
                     <span className="plan-card-label">{label}</span>
-                    <span>Empty</span>
+                    <FitText>Empty</FitText>
                   </button>
                 );
               }
@@ -1052,7 +1103,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                   onClick={() => chooseCard(card)}
                 >
                   <span className="plan-card-label">{label}</span>
-                  <span>{title}</span>
+                  <FitText>{title}</FitText>
                 </button>
               );
             })}
@@ -1060,7 +1111,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
 
           <div className="arena-hint-box">
             <p className="arena-hint is-sizer" aria-hidden="true">
-              {PLANNER_HINT_WALK}
+              {PLANNER_HINT_SIZER}
             </p>
             <p className="arena-hint">{plannerHint}</p>
           </div>
@@ -1137,7 +1188,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
           >
             Rewatch
           </button>
-          <p className="arena-copy">The hen is calling everyone back to the nest.</p>
+          <p className="arena-copy">The host is calling everyone back to the nest.</p>
         </div>
       )}
     </div>

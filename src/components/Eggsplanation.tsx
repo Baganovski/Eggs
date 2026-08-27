@@ -78,6 +78,14 @@ export function Eggsplanation() {
                 Sit holds a beat. Then the actions crack.
               </p>
             </li>
+            <li className="eggsplanation-item">
+              <h3>Straight before slant</h3>
+              <p>
+                If two eggs step onto the same square, the one walking
+                straight (up, down, left, or right) takes it. The diagonal
+                walker tries, then stays put.
+              </p>
+            </li>
           </ul>
 
           <button type="submit" className="btn btn-primary">

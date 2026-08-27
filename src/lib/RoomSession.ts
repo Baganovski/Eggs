@@ -132,11 +132,15 @@ export class RoomSession {
     this.broadcastLobby();
   }
 
-  removeBot(playerId: string): void {
+  kickPlayer(playerId: string): void {
     if (!this.isHost) return;
     if (this.state.phase !== 'lobby') return;
-    const bot = this.state.players.find((player) => player.id === playerId);
-    if (!bot?.isBot) return;
+    if (playerId === this.state.localPlayerId) return;
+    const target = this.state.players.find((player) => player.id === playerId);
+    if (!target) return;
+    if (!target.isBot && target.connected) return;
+    this.connections.get(playerId)?.close();
+    this.connections.delete(playerId);
     this.state.players = this.state.players.filter((player) => player.id !== playerId);
     this.broadcastLobby();
   }
@@ -481,7 +485,7 @@ export class RoomSession {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         cleanup();
-        reject(new Error('Could not reach the hen. Try rolling back into the nest.'));
+        reject(new Error('Could not reach the host. Try rolling back into the nest.'));
       }, timeoutMs);
 
       const cleanup = () => {
@@ -661,7 +665,7 @@ export class RoomSession {
     if (startedBy !== this.state.hostPlayerId) {
       this.broadcast({
         type: 'notice',
-        message: 'Only the hen can start the scramble.',
+        message: 'Only the host can start the scramble.',
       });
       return;
     }
@@ -772,7 +776,7 @@ export class RoomSession {
 
     const newHostId = electHost(this.state.players);
     if (!newHostId) {
-      this.emitError('Could not elect a new hen.');
+      this.emitError('Could not elect a new host.');
       this.destroy();
       return;
     }
@@ -784,7 +788,7 @@ export class RoomSession {
         await this.promoteToHost();
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : 'Failed to take over as hen.';
+          error instanceof Error ? error.message : 'Failed to take over as host.';
         this.emitError(message);
         this.migrationInProgress = false;
         return;
@@ -797,7 +801,7 @@ export class RoomSession {
   }
 
   private async promoteToHost(): Promise<void> {
-    this.emitNotice('You are now the hen.');
+    this.emitNotice('You are now the host.');
     this.clearPlaybackTimer();
     this.clearBotTimers();
     this.clearPlanTimer();
@@ -831,7 +835,7 @@ export class RoomSession {
   }
 
   private async reconnectToHost(): Promise<void> {
-    this.emitNotice('The hen changed. Reconnecting…');
+    this.emitNotice('The host changed. Reconnecting…');
     for (const connection of this.connections.values()) {
       connection.close();
     }
@@ -886,7 +890,7 @@ export class RoomSession {
     this.state = withLocalId(message.state, this.state.localPlayerId);
     this.state.hostPlayerId = message.newHostPlayerId;
     this.isHost = message.newHostPlayerId === this.state.localPlayerId;
-    this.emitNotice('New hen connected. The scramble continues.');
+    this.emitNotice('New host connected. The scramble continues.');
     this.emitState();
   }
 }

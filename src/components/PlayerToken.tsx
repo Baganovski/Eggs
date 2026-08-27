@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { PLAYER_HUES } from '../types/game';
 
 interface PlayerTokenProps {
@@ -11,6 +11,19 @@ interface PlayerTokenProps {
   isHatched?: boolean;
   bump?: { dr: number; dc: number };
   tiltSeed?: string;
+  idle?: boolean;
+}
+
+const IDLE_MIN_MS = 5000;
+const IDLE_SPAN_MS = 5000;
+
+function idlePeriodMs(seed: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return IDLE_MIN_MS + (Math.abs(hash) % (IDLE_SPAN_MS + 1));
 }
 
 function eggTiltDeg(seed: string): number {
@@ -22,29 +35,9 @@ function eggTiltDeg(seed: string): number {
   return (Math.abs(hash) % 21) - 10;
 }
 
-function Face({ isHit }: { isHit?: boolean }) {
-  if (isHit) {
-    return (
-      <>
-        <circle cx="48" cy="74" r="4.5" fill="currentColor" />
-        <circle cx="72" cy="74" r="4.5" fill="currentColor" />
-        <path d="M50 100 Q60 90 70 100" />
-      </>
-    );
-  }
-  return (
-    <>
-      <circle cx="48" cy="74" r="4.5" fill="currentColor" />
-      <circle cx="72" cy="74" r="4.5" fill="currentColor" />
-      <path d="M50 96 Q60 108 70 96" />
-    </>
-  );
-}
-
 function Chick({ hue }: { hue: string }) {
   return (
     <svg viewBox="0 0 120 150" aria-hidden="true">
-      <ellipse className="chick-shadow" cx="60" cy="140" rx="28" ry="5" fill="#111" opacity="0.18" />
       <g className="chick-body">
         <ellipse
           cx="60"
@@ -142,9 +135,50 @@ export function PlayerToken({
   isHatched,
   bump,
   tiltSeed,
+  idle,
 }: PlayerTokenProps) {
   const hue = PLAYER_HUES[joinOrder % PLAYER_HUES.length];
-  const tilt = tiltSeed ? eggTiltDeg(tiltSeed) : 0;
+  const [idlePose, setIdlePose] = useState(0);
+  const [idleSnap, setIdleSnap] = useState(false);
+  const firstWait = useRef(true);
+  const [poseSeed, setPoseSeed] = useState(tiltSeed);
+  if (tiltSeed !== poseSeed) {
+    setPoseSeed(tiltSeed);
+    setIdlePose(0);
+    setIdleSnap(false);
+    firstWait.current = true;
+  }
+
+  const baseSeed = tiltSeed ?? `${joinOrder}:${name}`;
+  const tilt = eggTiltDeg(idlePose > 0 ? `${baseSeed}:idle:${idlePose}` : baseSeed);
+
+  useEffect(() => {
+    if (!idleSnap) return;
+    let inner = 0;
+    const outer = window.requestAnimationFrame(() => {
+      inner = window.requestAnimationFrame(() => setIdleSnap(false));
+    });
+    return () => {
+      window.cancelAnimationFrame(outer);
+      window.cancelAnimationFrame(inner);
+    };
+  }, [idleSnap]);
+
+  useEffect(() => {
+    const canIdle = idle && !isDown && !isHatched && !isHit && !isShooting;
+    if (!canIdle) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const wait = firstWait.current
+      ? idlePeriodMs(`${baseSeed}:start`)
+      : idlePeriodMs(`${baseSeed}:${idlePose}`);
+    firstWait.current = false;
+    const timeout = window.setTimeout(() => {
+      setIdleSnap(true);
+      setIdlePose((pose) => pose + 1);
+    }, wait);
+    return () => window.clearTimeout(timeout);
+  }, [idle, isDown, isHatched, isHit, isShooting, baseSeed, idlePose]);
 
   return (
     <span
@@ -152,7 +186,7 @@ export function PlayerToken({
         isHit ? ' is-hit' : ''
       }${isShooting ? ' is-shooting' : ''}${isHatched ? ' is-hatched' : ''}${
         bump ? ' is-bump' : ''
-      }`}
+      }${idleSnap ? ' is-idle-snap' : ''}`}
       style={
         {
           '--bump-dr': bump?.dr ?? 0,
@@ -176,7 +210,6 @@ export function PlayerToken({
         <FriedEgg hue={hue} />
       ) : (
         <svg viewBox="0 0 120 150" aria-hidden="true">
-          <ellipse cx="60" cy="140" rx="30" ry="6" fill="#111" opacity="0.18" />
           <path
             d="M60 8 C86 8 108 52 108 92 C108 124 86 142 60 142 C34 142 12 124 12 92 C12 52 34 8 60 8 Z"
             fill="none"
@@ -189,9 +222,6 @@ export function PlayerToken({
             fill={hue}
           />
           <ellipse cx="46" cy="52" rx="16" ry="22" fill="#fff" opacity="0.38" />
-          <g fill="none" stroke="currentColor" strokeWidth="5" strokeLinecap="round">
-            <Face isHit={isHit} />
-          </g>
         </svg>
       )}
       {isShooting && !isDown && <span className="arena-token-callout">{name}</span>}

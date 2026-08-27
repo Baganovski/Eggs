@@ -9,26 +9,50 @@ function HomeEggCluster() {
   const shell =
     'M60 8 C86 8 108 52 108 92 C108 124 86 142 60 142 C34 142 12 124 12 92 C12 52 34 8 60 8 Z';
 
-  const renderEgg = (fill: string) => (
-    <>
-      <ellipse cx="60" cy="138" rx="34" ry="7" fill="#d4d1d6" />
-      <path d={shell} fill={fill} stroke="#111" strokeWidth="5" strokeLinejoin="round" />
-      <ellipse cx="46" cy="52" rx="16" ry="22" fill="#fff" opacity="0.38" />
-    </>
-  );
-
-  const place = (cx: number, cy: number, scale: number, rotate: number, fill: string) => (
-    <g transform={`translate(${cx} ${cy}) rotate(${rotate}) scale(${scale})`}>
-      <g transform="translate(-60 -75)">{renderEgg(fill)}</g>
-    </g>
-  );
+  const eggs = [
+    { cx: 48, cy: 132, scale: 0.62, rotate: -16, fill: PLAYER_HUES[3], dur: '2.8s', delay: '0s' },
+    { cx: 218, cy: 132, scale: 0.64, rotate: 14, fill: PLAYER_HUES[2], dur: '2.4s', delay: '0.6s' },
+    { cx: 82, cy: 132, scale: 0.74, rotate: -6, fill: PLAYER_HUES[1], dur: '3.2s', delay: '0.3s' },
+    { cx: 148, cy: 132, scale: 1, rotate: 6, fill: PLAYER_HUES[0], dur: '2.6s', delay: '1.1s' },
+  ];
 
   return (
     <svg className="home-egg-stack" viewBox="8 64 264 142" aria-hidden="true">
-      {place(48, 132, 0.62, -16, PLAYER_HUES[3])}
-      {place(218, 132, 0.64, 14, PLAYER_HUES[2])}
-      {place(82, 132, 0.74, -6, PLAYER_HUES[1])}
-      {place(148, 132, 1, 6, PLAYER_HUES[0])}
+      <defs>
+        <filter id="home-egg-shadow" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="2.4" />
+        </filter>
+      </defs>
+      {eggs.map((egg) => (
+        <ellipse
+          key={`${egg.fill}-shadow`}
+          cx={egg.cx + egg.scale * 8}
+          cy={egg.cy + egg.scale * 66}
+          rx={egg.scale * 30}
+          ry={egg.scale * 9}
+          fill="#111"
+          opacity="0.22"
+          filter="url(#home-egg-shadow)"
+        />
+      ))}
+      {eggs.map((egg) => (
+        <g
+          key={egg.fill}
+          className="home-egg-fidget"
+          style={{
+            transformOrigin: `${egg.cx}px ${egg.cy}px`,
+            animationDuration: egg.dur,
+            animationDelay: egg.delay,
+          }}
+        >
+          <g transform={`translate(${egg.cx} ${egg.cy}) rotate(${egg.rotate}) scale(${egg.scale})`}>
+            <g transform="translate(-60 -75)">
+              <path d={shell} fill={egg.fill} stroke="#111" strokeWidth="5" strokeLinejoin="round" />
+              <ellipse cx="46" cy="52" rx="16" ry="22" fill="#fff" opacity="0.38" />
+            </g>
+          </g>
+        </g>
+      ))}
     </svg>
   );
 }
@@ -46,7 +70,7 @@ export function App() {
     startGame,
     sendPlayerAction,
     addBot,
-    removeBot,
+    kickPlayer,
     leaveRoom,
     clearNotice,
     clearError,
@@ -74,7 +98,7 @@ export function App() {
         isHost={isHost}
         onStart={startGame}
         onAddBot={addBot}
-        onRemoveBot={removeBot}
+        onKick={kickPlayer}
         onSetCartonType={(cartonType) => sendPlayerAction({ type: 'setCartonType', cartonType })}
         onLeave={leaveRoom}
         onSubmitPlan={(plan) => sendPlayerAction({ type: 'submitPlan', ...plan })}

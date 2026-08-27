@@ -22,7 +22,7 @@ interface GameRoomContextValue {
   startGame: () => void;
   sendPlayerAction: (action: PlayerAction) => void;
   addBot: () => void;
-  removeBot: (playerId: string) => void;
+  kickPlayer: (playerId: string) => void;
   leaveRoom: () => void;
   clearNotice: () => void;
   clearError: () => void;
@@ -115,8 +115,8 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
     sessionRef.current?.addBot();
   }, []);
 
-  const removeBot = useCallback((playerId: string) => {
-    sessionRef.current?.removeBot(playerId);
+  const kickPlayer = useCallback((playerId: string) => {
+    sessionRef.current?.kickPlayer(playerId);
   }, []);
 
   const value = useMemo(
@@ -130,7 +130,7 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
       startGame,
       sendPlayerAction,
       addBot,
-      removeBot,
+      kickPlayer,
       leaveRoom,
       clearNotice: () => setNotice(null),
       clearError: () => setError(null),
@@ -145,7 +145,7 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
       startGame,
       sendPlayerAction,
       addBot,
-      removeBot,
+      kickPlayer,
       leaveRoom,
     ],
   );

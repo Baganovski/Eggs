@@ -297,6 +297,37 @@ export function shotRayCells(
   return cells;
 }
 
+export function validShootCells(
+  weapon: WeaponKind,
+  from: Cell,
+  carton: CartonSpec,
+  mapObjects: Cell[] = [],
+): Cell[] {
+  const seen = new Set<string>();
+  const cells: Cell[] = [];
+  const add = (cell: Cell) => {
+    if (isObjectCell(cell, mapObjects)) return;
+    const key = `${cell.row},${cell.col}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    cells.push(cell);
+  };
+
+  const dirs = isCardinalWeapon(weapon) ? CARDINAL_DIRS : DIRECTIONS;
+  for (const dir of dirs) {
+    if (isCardinalWeapon(weapon)) {
+      const fan = weaponFanCells(weapon, from, dir, carton, mapObjects);
+      if (!fan?.length) continue;
+    }
+    const ray =
+      weapon === 'bomb'
+        ? bombThrowCells(from, dir, carton)
+        : shotRayCells(from, dir, mapObjects, carton, WEAPON_STATS[weapon].range);
+    for (const cell of ray) add(cell);
+  }
+  return cells;
+}
+
 export function isAdjacent8(a: Cell, b: Cell): boolean {
   const dr = Math.abs(a.row - b.row);
   const dc = Math.abs(a.col - b.col);
@@ -651,6 +682,12 @@ function hasFriedEggAt(players: Player[], cell: Cell): boolean {
   return players.some((player) => player.hp <= 0 && cellsEqual(player, cell));
 }
 
+function isOrthogonalMove(from: Cell, to: Cell): boolean {
+  const dr = Math.abs(to.row - from.row);
+  const dc = Math.abs(to.col - from.col);
+  return (dr === 1 && dc === 0) || (dr === 0 && dc === 1);
+}
+
 function isDiagonalMove(from: Cell, to: Cell): boolean {
   return Math.abs(to.row - from.row) === 1 && Math.abs(to.col - from.col) === 1;
 }
@@ -721,10 +758,21 @@ function resolveMovement(
     destGroups.set(key, group);
   }
   for (const group of destGroups.values()) {
-    if (group.length < 2) continue;
-    for (const intent of group) {
-      if (!cellsEqual(intent.from, intent.to)) failed.add(intent.id);
+    const movers = group.filter((intent) => !cellsEqual(intent.from, intent.to));
+    const occupied = group.some((intent) => cellsEqual(intent.from, intent.to));
+    if (occupied) {
+      for (const intent of movers) failed.add(intent.id);
+      continue;
     }
+    if (movers.length < 2) continue;
+    const straight = movers.filter((intent) => isOrthogonalMove(intent.from, intent.to));
+    if (straight.length === 1) {
+      for (const intent of movers) {
+        if (intent.id !== straight[0].id) failed.add(intent.id);
+      }
+      continue;
+    }
+    for (const intent of movers) failed.add(intent.id);
   }
 
   for (let i = 0; i < intents.length; i += 1) {
@@ -761,20 +809,16 @@ function resolveMovement(
     }
   }
 
-  return players.map((player) => {
+  const nextPlayers = players.map((player) => {
     const intent = byId.get(player.id);
     if (!intent) return player;
-    if (failed.has(player.id) || cellsEqual(intent.from, intent.to)) {
-      if (!cellsEqual(intent.from, intent.to)) {
-        timeline.push({
-          type: 'blocked',
-          playerId: player.id,
-          from: intent.from,
-          attempted: intent.to,
-        });
-      }
-      return player;
-    }
+    if (failed.has(player.id) || cellsEqual(intent.from, intent.to)) return player;
+    return { ...player, row: intent.to.row, col: intent.to.col };
+  });
+
+  for (const player of players) {
+    const intent = byId.get(player.id);
+    if (!intent || cellsEqual(intent.from, intent.to) || failed.has(player.id)) continue;
     timeline.push({
       type: 'move',
       playerId: player.id,
@@ -786,8 +830,19 @@ function resolveMovement(
       eggStains.push(stain);
       timeline.push({ type: 'eggStain', cell: stain });
     }
-    return { ...player, row: intent.to.row, col: intent.to.col };
-  });
+  }
+  for (const player of players) {
+    const intent = byId.get(player.id);
+    if (!intent || cellsEqual(intent.from, intent.to) || !failed.has(player.id)) continue;
+    timeline.push({
+      type: 'blocked',
+      playerId: player.id,
+      from: intent.from,
+      attempted: intent.to,
+    });
+  }
+
+  return nextPlayers;
 }
 
 function outcomeFrom(players: Player[]): MatchOutcome {
@@ -1101,8 +1156,9 @@ export function groupTimeline(timeline: PlaybackEvent[]): PlaybackEvent[][] {
     switch (event.type) {
       case 'move':
       case 'eggStain':
-      case 'blocked':
         return 'step';
+      case 'blocked':
+        return 'blocked';
       case 'shot':
         return 'shot';
       case 'hit':
