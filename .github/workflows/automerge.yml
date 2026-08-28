@@ -46,4 +46,9 @@ jobs:
             "repos/${{ github.repository }}/git/refs/heads/${HEAD_REF}" \
             || echo "Branch ${HEAD_REF} already deleted."
           echo "Deploying merged main to GitHub Pages"
-          gh workflow run "Deploy to GitHub Pages" --ref main
+          # Merges made with GITHUB_TOKEN do not start other workflows (no
+          # recursive Actions). Dispatch deploy via the REST API — this job
+          # has no git checkout, so `gh workflow run` would fail.
+          gh api -X POST \
+            "repos/${{ github.repository }}/actions/workflows/deploy.yml/dispatches" \
+            -f ref=main

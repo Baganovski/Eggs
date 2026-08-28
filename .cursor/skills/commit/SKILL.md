@@ -1,16 +1,16 @@
 ---
 name: commit
-description: Bump the app version, then commit the currently staged changes with a clear, conventional message, then push to the remote. Use whenever asked to commit staged changes, "commit what's staged", or "make a commit". Only commits what is already staged (plus the version bump) — it does not stage other new files unless the user asks.
+description: Bump the app version, then commit the currently staged changes with a clear, conventional message, then push, open a PR, and wait until GitHub Pages is serving that version. Use whenever asked to commit staged changes, "commit what's staged", or "make a commit". Only commits what is already staged (plus the version bump) — it does not stage other new files unless the user asks.
 disable-model-invocation: true
 ---
 
 # Commit staged changes (with a version bump), then push
 
 Bump the app version and then create a single commit from the changes that are
-**already staged**, then push the branch to its remote. Do not stage other files
-unless the user explicitly asks — the point of this skill is to commit the
-user's chosen staged set (plus the version bump this skill makes), not
-everything in the working tree.
+**already staged**, then push the branch, open a PR, and wait until GitHub Pages
+is serving that version. Do not stage other files unless the user explicitly
+asks — the point of this skill is to commit the user's chosen staged set (plus
+the version bump this skill makes), not everything in the working tree.
 
 ## ⚠️ Never run this proactively
 
@@ -157,9 +157,7 @@ rather than assuming.
    Use `-u` when the branch is new (the usual case after step 0). If the push
    is rejected (e.g. non-fast-forward), stop and tell the user rather than
    force-pushing. If there is no remote yet, report that the commit is local
-   only. If there is no open PR yet and the user asked only to commit, still
-   push the branch when a remote exists; mention that a PR can be opened when
-   they want it.
+   only.
 
 8. **Check CI** if `.github/workflows` exists. Before pushing you can catch
    failures locally:
@@ -168,11 +166,31 @@ rather than assuming.
    npm run build
    ```
 
-   If the build fails, say so plainly and don't paper over it. If the user wants
-   to watch a remote run, use `gh run list --limit 1` / `gh run watch`.
+   If the build fails, say so plainly and don't paper over it.
 
-9. **Report.** Give the commit hash, subject, old → new version, confirm the push
-   succeeded (or explain why it didn't), and note the CI status if checked.
+9. **Open a PR and ship to GitHub Pages.** A `/commit` is not done until the
+   site on GitHub Pages is serving this version. This repo squash-merges PRs
+   after CI (`.github/workflows/automerge.yml`) and then deploys
+   (`.github/workflows/deploy.yml`). After a successful push:
+
+   ```
+   gh pr list --head "$(git branch --show-current)" --state open --json number --jq '.[0].number // empty'
+   ```
+
+   - If there is no open PR, create one with `gh pr create` (title = commit
+     subject, body = the commit bullets). Do not wait for the user to ask.
+   - Watch CI until it succeeds (`gh run watch` on the PR's CI run).
+   - Automerge should squash-merge to `main` and trigger Pages. Confirm the
+     PR is merged (`gh pr view --json state,mergedAt`) and that
+     **Deploy to GitHub Pages** on `main` has completed.
+   - If automerge did not fire, squash-merge the PR (`gh pr merge --squash`)
+     and, if deploy still does not start, `gh workflow run "Deploy to GitHub Pages" --ref main`.
+   - Report the live Pages URL (typically
+     `https://baganovski.github.io/Eggs/`) so the user can click through.
+
+10. **Report.** Give the commit hash, subject, old → new version, PR URL,
+    confirm the push and Pages deploy succeeded (or explain why they didn't),
+    and note the CI status.
 
 ## Do not
 
