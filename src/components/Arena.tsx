@@ -912,46 +912,6 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         </p>
       </div>
 
-      <ul className="arena-hud">
-        {tokens.map((player) => (
-          <li
-            key={player.id}
-            className={`arena-hud-seat${player.isYou ? ' is-you' : ''}${
-              player.hp <= 0 ? ' is-down' : ''
-            }${shootingIds.includes(player.id) ? ' is-shooting' : ''}`}
-          >
-            <span
-              className="arena-hud-swatch"
-              style={{ background: playerColor(player.joinOrder) }}
-            />
-            <span className="arena-hud-name">
-              {player.name}
-              {player.isYou ? ' (you)' : ''}
-            </span>
-            <span className="arena-hp" aria-label={`${player.hp} HP`}>
-              {Array.from({ length: STARTING_HP }, (_, index) => (
-                <span key={index} className={index < player.hp ? 'pip on' : 'pip'} />
-              ))}
-            </span>
-            <span className="arena-hud-note">
-              {shootingIds.includes(player.id)
-                ? 'cracking'
-                : !player.connected
-                  ? 'rolled off'
-                : player.hp <= 0
-                  ? 'fried'
-                  : planning && (player.planSubmitted || (player.isYou && localLocked))
-                    ? 'scrambled'
-                    : planning
-                      ? 'thinking'
-                      : player.isBot
-                        ? 'bot'
-                        : ''}
-            </span>
-          </li>
-        ))}
-      </ul>
-
       <div
         className="arena-stage"
         style={
@@ -1048,6 +1008,47 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
           </div>
         </div>
       </div>
+
+      <div className="arena-side">
+        <ul className="arena-hud">
+        {tokens.map((player) => (
+          <li
+            key={player.id}
+            className={`arena-hud-seat${player.isYou ? ' is-you' : ''}${
+              player.hp <= 0 ? ' is-down' : ''
+            }${shootingIds.includes(player.id) ? ' is-shooting' : ''}`}
+          >
+            <span
+              className="arena-hud-swatch"
+              style={{ background: playerColor(player.joinOrder) }}
+            />
+            <span className="arena-hud-name">
+              {player.name}
+              {player.isYou ? ' (you)' : ''}
+            </span>
+            <span className="arena-hp" aria-label={`${player.hp} HP`}>
+              {Array.from({ length: STARTING_HP }, (_, index) => (
+                <span key={index} className={index < player.hp ? 'pip on' : 'pip'} />
+              ))}
+            </span>
+            <span className="arena-hud-note">
+              {shootingIds.includes(player.id)
+                ? 'cracking'
+                : !player.connected
+                  ? 'rolled off'
+                : player.hp <= 0
+                  ? 'fried'
+                  : planning && (player.planSubmitted || (player.isYou && localLocked))
+                    ? 'scrambled'
+                    : planning
+                      ? 'thinking'
+                      : player.isBot
+                        ? 'bot'
+                        : ''}
+            </span>
+          </li>
+        ))}
+      </ul>
 
       {showPlanner && (
         <div className="arena-planner">
@@ -1191,6 +1192,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
           <p className="arena-copy">The host is calling everyone back to the nest.</p>
         </div>
       )}
+      </div>
     </div>
   );
 }

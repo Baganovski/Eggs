@@ -82,34 +82,36 @@ export function RoomShell({
               onKick={onKick}
             />
 
-            <CartonPicker
-              value={state.cartonType}
-              playerCount={state.players.length}
-              isHost={isHost}
-              onChange={onSetCartonType}
-            />
+            <div className="lobby-controls">
+              <CartonPicker
+                value={state.cartonType}
+                playerCount={state.players.length}
+                isHost={isHost}
+                onChange={onSetCartonType}
+              />
 
-            {isHost ? (
-              <div className="lobby-actions">
-                {connectedCount < carton.maxPlayers && (
-                  <button type="button" className="btn btn-secondary" onClick={onAddBot}>
-                    Add a bot
+              {isHost ? (
+                <div className="lobby-actions">
+                  {connectedCount < carton.maxPlayers && (
+                    <button type="button" className="btn btn-secondary" onClick={onAddBot}>
+                      Add a bot
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={!canStart}
+                    onClick={onStart}
+                  >
+                    {canStart
+                      ? 'Crack on'
+                      : `Need ${MIN_PLAYERS}+ eggs (${connectedCount}/${carton.maxPlayers})`}
                   </button>
-                )}
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={!canStart}
-                  onClick={onStart}
-                >
-                  {canStart
-                    ? 'Crack on'
-                    : `Need ${MIN_PLAYERS}+ eggs (${connectedCount}/${carton.maxPlayers})`}
-                </button>
-              </div>
-            ) : (
-              <p className="waiting-host">Waiting on the host.</p>
-            )}
+                </div>
+              ) : (
+                <p className="waiting-host">Waiting on the host.</p>
+              )}
+            </div>
           </section>
         ) : (
           <section className="panel game-panel">

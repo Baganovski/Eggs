@@ -11,6 +11,7 @@
   --hit: #ff5a3c;
   --light-red: #ffb0a0;
   --shadow: 4px 4px 0 #111;
+  --ink-drop: drop-shadow(4px 4px 0 #111);
   --room-column: min(480px, calc(100% - 32px));
   font-family: 'DM Sans', system-ui, sans-serif;
   font-synthesis: none;
@@ -87,6 +88,12 @@ h3,
   -ms-overflow-style: none;
 }
 
+.room-shell:has(.room-main.is-arena) {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
 .app-shell::-webkit-scrollbar,
 .room-shell::-webkit-scrollbar {
   width: 0;
@@ -123,7 +130,7 @@ h3,
 }
 
 .room-main.is-arena {
-  padding: 16px 0 20px;
+  padding: 16px 8px 28px;
 }
 
 .home-hero {
@@ -292,6 +299,9 @@ h2 {
 
 .home-panel {
   margin-block: 8px;
+  margin-inline: auto;
+  width: min(360px, 100%);
+  padding: 18px 16px;
 }
 
 .panel-header {
@@ -337,13 +347,15 @@ h2 {
   cursor: pointer;
   font-weight: 800;
   letter-spacing: 0.01em;
-  box-shadow: var(--shadow);
+  box-shadow: none;
+  filter: var(--ink-drop);
 }
 
 .btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
   box-shadow: none;
+  filter: none;
 }
 
 .btn-primary {
@@ -357,6 +369,7 @@ h2 {
 .btn-ghost {
   background: transparent;
   box-shadow: none;
+  filter: none;
 }
 
 .btn-lime {
@@ -632,13 +645,15 @@ h2 {
 
 .carton-option.is-selected {
   background: var(--yellow);
-  box-shadow: var(--shadow);
+  box-shadow: none;
+  filter: var(--ink-drop);
 }
 
 .carton-option:disabled {
   opacity: 0.45;
   cursor: not-allowed;
   box-shadow: none;
+  filter: none;
 }
 
 .carton-mini-wrap {
@@ -691,6 +706,10 @@ h2 {
   margin-top: 0;
 }
 
+.lobby-controls {
+  min-width: 0;
+}
+
 .lobby-panel,
 .game-panel {
   width: 100%;
@@ -713,6 +732,10 @@ h2 {
   overflow-x: hidden;
   overflow-y: auto;
   padding: 0 6px 6px;
+}
+
+.arena-side {
+  display: contents;
 }
 
 .arena-status-row {
@@ -748,6 +771,7 @@ h2 {
   display: grid;
   gap: 8px;
   flex: 0 0 auto;
+  order: 1;
 }
 
 .arena-hud-seat {
@@ -798,10 +822,11 @@ h2 {
   min-width: 0;
   width: 100%;
   display: grid;
-  grid-template-rows: auto auto;
+  grid-template-rows: auto minmax(0, 1fr);
   justify-items: stretch;
   align-items: start;
   gap: 10px;
+  order: 2;
 }
 
 .arena-timer {
@@ -818,6 +843,8 @@ h2 {
   min-height: 0;
   min-width: 0;
   width: 100%;
+  display: flex;
+  justify-content: center;
 }
 
 .arena-timer-fill {
@@ -856,7 +883,11 @@ h2 {
 .arena-board-wrap {
   --board-pad: 6px;
   --board-stroke: 3px;
-  width: 100%;
+  width: min(
+    100%,
+    480px,
+    calc((100dvh - 14rem) * var(--board-cols, 7) / var(--board-rows, 7))
+  );
   margin: 0;
   padding: var(--board-pad);
   background: #fff;
@@ -1251,6 +1282,8 @@ h2 {
   display: grid;
   gap: 12px;
   justify-items: stretch;
+  order: 3;
+  padding: 0 4px 4px 0;
 }
 
 .replay-row .btn {
@@ -1259,7 +1292,9 @@ h2 {
 }
 
 .replay-row .btn-ghost {
-  box-shadow: var(--shadow);
+  background: var(--cream);
+  box-shadow: none;
+  filter: var(--ink-drop);
 }
 
 .arena-planner,
@@ -1267,6 +1302,7 @@ h2 {
   display: grid;
   gap: 12px;
   flex: 0 0 auto;
+  order: 3;
 }
 
 .arena-outcome {
@@ -1281,6 +1317,7 @@ h2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+  padding: 0 4px 4px 0;
 }
 
 .hand-row,
@@ -1310,7 +1347,8 @@ h2 {
   cursor: pointer;
   text-align: left;
   font-weight: 800;
-  box-shadow: var(--shadow);
+  box-shadow: none;
+  filter: var(--ink-drop);
 }
 
 .plan-card-label {
@@ -1332,6 +1370,7 @@ h2 {
   border-style: dotted;
   background: transparent;
   box-shadow: none;
+  filter: none;
   opacity: 1;
   cursor: default;
 }
@@ -1341,12 +1380,14 @@ h2 {
   opacity: 0.45;
   cursor: not-allowed;
   box-shadow: none;
+  filter: none;
 }
 
 .plan-card.is-selected:disabled {
   opacity: 1;
   cursor: pointer;
-  box-shadow: var(--shadow);
+  box-shadow: none;
+  filter: var(--ink-drop);
 }
 
 .planner-actions {
@@ -1356,7 +1397,7 @@ h2 {
 }
 
 .planner-actions .btn-primary {
-  filter: drop-shadow(4px 4px 0 #111);
+  filter: var(--ink-drop);
   box-shadow: none;
 }
 
@@ -1377,7 +1418,8 @@ h2 {
   cursor: pointer;
   text-align: left;
   font-weight: 800;
-  box-shadow: var(--shadow);
+  box-shadow: none;
+  filter: var(--ink-drop);
 }
 
 .action-slot > .fit-text {
@@ -1388,6 +1430,7 @@ h2 {
   opacity: 0.45;
   cursor: not-allowed;
   box-shadow: none;
+  filter: none;
 }
 
 .action-slot-label {
@@ -1428,7 +1471,8 @@ h2 {
 .btn.is-selected {
   background: var(--orange);
   color: var(--ink);
-  box-shadow: var(--shadow);
+  box-shadow: none;
+  filter: var(--ink-drop);
 }
 
 .dir-pad {
@@ -1790,6 +1834,104 @@ h2 {
   .toast-stack {
     bottom: 12px;
     width: min(520px, calc(100% - 16px));
+  }
+}
+
+@media (min-width: 720px) {
+  .room-main:not(.is-arena) {
+    width: min(760px, calc(100% - 40px));
+  }
+
+  .room-main.is-arena {
+    width: min(860px, calc(100% - 40px));
+  }
+
+  .lobby-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    gap: 8px 24px;
+    align-items: start;
+  }
+
+  .lobby-panel .panel-header {
+    grid-column: 1 / -1;
+    margin-bottom: 4px;
+  }
+
+  .lobby-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .lobby-panel .roster-list,
+  .lobby-panel .carton-picker {
+    margin-bottom: 0;
+  }
+
+  .lobby-panel .lobby-actions {
+    margin-top: 0;
+  }
+
+  .lobby-panel .btn-primary {
+    margin-top: 0;
+  }
+
+  .arena {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 14px 16px;
+    align-items: stretch;
+    overflow: hidden;
+  }
+
+  .arena-status-row {
+    grid-column: 1 / -1;
+  }
+
+  .arena-stage {
+    grid-column: 1;
+    grid-row: 2;
+    order: unset;
+    align-self: stretch;
+    min-height: 0;
+  }
+
+  .arena-side {
+    grid-column: 2;
+    grid-row: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    min-height: 0;
+    max-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    align-self: stretch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .arena-side::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+
+  .arena-hud,
+  .arena-planner,
+  .arena-outcome,
+  .replay-row {
+    order: unset;
+  }
+
+  .arena-board-slot {
+    display: flex;
+    justify-content: center;
+    align-items: start;
+    min-height: 0;
   }
 }
 
