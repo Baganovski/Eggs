@@ -167,7 +167,7 @@ export function App() {
                   Roll back
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={isConnecting}>
-                  {isConnecting ? 'Building the nest…' : 'Crack on'}
+                  {isConnecting ? 'Building' : 'Crack on'}
                 </button>
               </div>
             </form>

@@ -662,6 +662,19 @@ export function Arena({
     if (!local) return new Map<string, number>();
     return planBeatNumbers({ row: local.row, col: local.col }, resolvedDraft);
   }, [local, resolvedDraft]);
+  const tokensByCell = useMemo(() => {
+    const grouped = new Map<string, Token[]>();
+    for (const token of tokens) {
+      const key = `${token.row},${token.col}`;
+      const list = grouped.get(key);
+      if (list) list.push(token);
+      else grouped.set(key, [token]);
+    }
+    for (const list of grouped.values()) {
+      list.sort((a, b) => a.hp - b.hp);
+    }
+    return grouped;
+  }, [tokens]);
   const livingCount = state.players.filter(isAlive).length;
   const submittedCount =
     state.players.filter((player) => isAlive(player) && player.planSubmitted).length +
@@ -956,13 +969,14 @@ export function Arena({
         <PlanTimerBar deadlineAt={planning ? state.planDeadlineAt : null} />
         <div className="arena-board-slot">
           <div className={`arena-board-wrap is-${carton.type}`}>
-            <div
-              className="arena-board"
-              style={{
-                gridTemplateColumns: `repeat(${carton.cols}, 1fr)`,
-                gridTemplateRows: `repeat(${carton.rows}, 1fr)`,
-              }}
-            >
+            <div className="arena-board-stack">
+              <div
+                className="arena-board"
+                style={{
+                  gridTemplateColumns: `repeat(${carton.cols}, 1fr)`,
+                  gridTemplateRows: `repeat(${carton.rows}, 1fr)`,
+                }}
+              >
           {Array.from({ length: carton.rows * carton.cols }, (_, index) => {
             const row = Math.floor(index / carton.cols);
             const col = index % carton.cols;
@@ -977,9 +991,7 @@ export function Arena({
             const isOrigin = canPlan && cellsEqual(origin, cell);
             const hasBlock = isObjectCell(cell, state.mapObjects);
             const hasPresent = presents.some((present) => cellsEqual(present, cell));
-            const occupants = tokens
-              .filter((token) => token.row === row && token.col === col)
-              .sort((a, b) => a.hp - b.hp);
+            const occupants = tokensByCell.get(cellKey) ?? [];
             const cellStains = stains.filter((stain) => stain.row === row && stain.col === col);
             const beamTint = beamTints.get(cellKey);
 
@@ -988,7 +1000,9 @@ export function Arena({
                 key={`${row}-${col}`}
                 type="button"
                 className={`arena-cell${(row + col) % 2 === 0 ? ' shade' : ''}${
-                  col === carton.cols - 1 ? ' is-last-col' : ''
+                  col === 0 ? ' is-first-col' : ''
+                }${col === carton.cols - 1 ? ' is-last-col' : ''}${
+                  row === 0 ? ' is-first-row' : ''
                 }${row === carton.rows - 1 ? ' is-last-row' : ''}${
                   walkTone === 'muted' ? ' on-path-muted' : ''
                 }${aimTone === 'muted' ? ' on-aim-muted' : ''}${
@@ -997,7 +1011,7 @@ export function Arena({
                   isValid ? ' is-valid' : ''
                 }${isOrigin ? ' is-origin' : ''}${beamTint ? ' on-beam' : ''}${
                   hasBlock ? ' has-block' : ''
-                }${hasPresent ? ' has-present' : ''}`}
+                }${occupants.length > 0 ? ' has-egg' : ''}${hasPresent ? ' has-present' : ''}`}
                 style={
                   {
                     '--cell-row': row,
@@ -1013,24 +1027,49 @@ export function Arena({
                 {cellStains.map((_, stainIndex) => (
                   <EggWhiteBlob key={`stain-${stainIndex}`} index={stainIndex} />
                 ))}
-                {occupants.map((token) => (
-                  <PlayerToken
-                    key={token.id}
-                    joinOrder={token.joinOrder}
-                    name={token.name}
-                    isYou={token.isYou}
-                    isDown={token.hp <= 0}
-                    isHit={flashIds.includes(token.id)}
-                    isShooting={shootingIds.includes(token.id)}
-                    isHatched={showOutcome && token.id === winnerId}
-                    bump={bumps[token.id]}
-                    tiltSeed={`${token.id}:${token.row}:${token.col}`}
-                    idle={token.hp > 0 && !showOutcome}
-                  />
-                ))}
               </button>
             );
           })}
+              </div>
+              <div
+                className="arena-token-layer"
+                style={{
+                  gridTemplateColumns: `repeat(${carton.cols}, 1fr)`,
+                  gridTemplateRows: `repeat(${carton.rows}, 1fr)`,
+                }}
+              >
+                {Array.from(tokensByCell.entries(), ([cellKey, occupants]) => {
+                  const [row, col] = cellKey.split(',').map(Number);
+                  return (
+                    <div
+                      key={cellKey}
+                      className={`arena-token-slot${
+                        col === carton.cols - 1 ? ' is-last-col' : ''
+                      }${row === carton.rows - 1 ? ' is-last-row' : ''}`}
+                      style={{
+                        gridRow: row + 1,
+                        gridColumn: col + 1,
+                      }}
+                    >
+                      {occupants.map((token) => (
+                        <PlayerToken
+                          key={token.id}
+                          joinOrder={token.joinOrder}
+                          name={token.name}
+                          isYou={token.isYou}
+                          isDown={token.hp <= 0}
+                          isHit={flashIds.includes(token.id)}
+                          isShooting={shootingIds.includes(token.id)}
+                          isHatched={showOutcome && token.id === winnerId}
+                          bump={bumps[token.id]}
+                          tiltSeed={`${token.id}:${token.row}:${token.col}`}
+                          idle={token.hp > 0 && !showOutcome}
+                        />
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
