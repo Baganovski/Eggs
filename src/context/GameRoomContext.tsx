@@ -9,8 +9,8 @@ import {
 } from 'react';
 import { RoomSession } from '../lib/RoomSession';
 import { generateRoomCode, normalizeRoomCode } from '../lib/roomCode';
-import { getOrCreatePlayerId } from '../lib/playerId';
-import type { GameState, PlayerAction } from '../types/game';
+import { getOrCreatePlayerId, resetPlayerId } from '../lib/playerId';
+import type { GameState, PlayerAction, RoomCallbacks } from '../types/game';
 
 interface GameRoomContextValue {
   state: GameState | null;
@@ -48,6 +48,23 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
     setIsConnecting(false);
   }, []);
 
+  const sessionCallbacks = useCallback((): RoomCallbacks => {
+    return {
+      onStateChange: setState,
+      onNotice: setNotice,
+      onError: setError,
+      onPlanRejected: () => setPlanRejectTick((tick) => tick + 1),
+      onKicked: (message) => {
+        resetPlayerId();
+        sessionRef.current = null;
+        setState(null);
+        setNotice(null);
+        setIsConnecting(false);
+        setError(message);
+      },
+    };
+  }, []);
+
   const createRoom = useCallback(
     async (playerName: string) => {
       leaveRoom();
@@ -58,12 +75,12 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
       const playerId = getOrCreatePlayerId();
 
       try {
-        const session = await RoomSession.create(roomCode, playerName.trim(), playerId, {
-          onStateChange: setState,
-          onNotice: setNotice,
-          onError: setError,
-          onPlanRejected: () => setPlanRejectTick((tick) => tick + 1),
-        });
+        const session = await RoomSession.create(
+          roomCode,
+          playerName.trim(),
+          playerId,
+          sessionCallbacks(),
+        );
         sessionRef.current = session;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Couldn’t lay this nest.';
@@ -72,7 +89,7 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
         setIsConnecting(false);
       }
     },
-    [leaveRoom],
+    [leaveRoom, sessionCallbacks],
   );
 
   const joinRoom = useCallback(
@@ -89,12 +106,7 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
           normalizedCode,
           playerName.trim(),
           playerId,
-          {
-            onStateChange: setState,
-            onNotice: setNotice,
-            onError: setError,
-            onPlanRejected: () => setPlanRejectTick((tick) => tick + 1),
-          },
+          sessionCallbacks(),
         );
         sessionRef.current = session;
       } catch (err) {
@@ -104,7 +116,7 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
         setIsConnecting(false);
       }
     },
-    [leaveRoom],
+    [leaveRoom, sessionCallbacks],
   );
 
   const startGame = useCallback(() => {

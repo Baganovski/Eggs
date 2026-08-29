@@ -4,6 +4,7 @@ import {
   cartonFitsPlayerCount,
   isCartonType,
   DEFAULT_CARTON_TYPE,
+  type GamePhase,
   type GameState,
   type Player,
   type PlayerAction,
@@ -107,6 +108,64 @@ export function resetPlayersForGameStart(players: Player[]): Player[] {
 
 export function markDisconnected(player: Player): Player {
   return { ...player, connected: false };
+}
+
+export type JoinRequestResult =
+  | { ok: true; players: Player[]; player: Player }
+  | { ok: false; error: string };
+
+export function applyJoinRequest(
+  players: Player[],
+  incoming: { playerId: string; name: string },
+  options: { phase: GamePhase; maxPlayers: number },
+): JoinRequestResult {
+  const name = incoming.name.trim();
+  const { playerId } = incoming;
+
+  if (!name) {
+    return { ok: false, error: 'Need an egg name.' };
+  }
+
+  const liveSeat = players.find((player) => player.id === playerId && player.connected);
+  if (liveSeat) {
+    return { ok: false, error: 'That egg is already in the carton.' };
+  }
+
+  const disconnectedSeat = players.find(
+    (player) => !player.connected && !player.isBot && player.id === playerId,
+  );
+
+  const nameTaken = players.some(
+    (player) =>
+      player.connected &&
+      player.id !== disconnectedSeat?.id &&
+      player.name.toLowerCase() === name.toLowerCase(),
+  );
+  if (nameTaken) {
+    return { ok: false, error: 'That egg name is already taken.' };
+  }
+
+  if (disconnectedSeat) {
+    const nextPlayer = { ...disconnectedSeat, name, connected: true };
+    return {
+      ok: true,
+      player: nextPlayer,
+      players: players.map((player) =>
+        player.id === disconnectedSeat.id ? nextPlayer : player,
+      ),
+    };
+  }
+
+  const activeCount = players.filter((player) => player.connected).length;
+  if (activeCount >= options.maxPlayers) {
+    return { ok: false, error: 'This nest is full.' };
+  }
+  if (options.phase !== 'lobby') {
+    return { ok: false, error: 'This scramble has already started.' };
+  }
+
+  const nextPlayer = createInitialPlayer(playerId, name, nextJoinOrder(players));
+  return { ok: true, player: nextPlayer, players: [...players, nextPlayer] };
 }
 
 export function startMatch(state: GameState): GameState {

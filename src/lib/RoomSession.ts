@@ -2,7 +2,6 @@ import Peer, { type DataConnection } from 'peerjs';
 import type {
   ArenaAction,
   GameState,
-  Player,
   PlayerAction,
   PublicGameState,
   RoomCallbacks,
@@ -24,9 +23,9 @@ import {
 import { chooseBotPlan } from './botLogic';
 import {
   applyPlayerAction,
+  applyJoinRequest,
   createBotPlayer,
   createHostLobbyState,
-  createInitialPlayer,
   createJoinerLobbyState,
   electHost,
   markDisconnected,
@@ -54,6 +53,7 @@ export class RoomSession {
   private botTimers: ReturnType<typeof setTimeout>[] = [];
   private planTimer: ReturnType<typeof setTimeout> | null = null;
   private latePlanTimer: ReturnType<typeof setTimeout> | null = null;
+  private kickCloseTimers: ReturnType<typeof setTimeout>[] = [];
 
   private constructor(state: GameState, callbacks: RoomCallbacks) {
     this.state = state;
@@ -132,15 +132,27 @@ export class RoomSession {
     if (playerId === this.state.localPlayerId) return;
     const target = this.state.players.find((player) => player.id === playerId);
     if (!target) return;
-    if (!target.isBot && target.connected) return;
-    this.connections.get(playerId)?.close();
+
+    const connection = this.connections.get(playerId);
+    if (connection?.open) {
+      this.send({ type: 'kicked', message: 'The host kicked you from the nest.' }, connection);
+    }
     this.connections.delete(playerId);
     this.state.players = this.state.players.filter((player) => player.id !== playerId);
     this.broadcastLobby();
+
+    if (connection) {
+      const timer = setTimeout(() => {
+        this.kickCloseTimers = this.kickCloseTimers.filter((entry) => entry !== timer);
+        if (connection.open) connection.close();
+      }, 250);
+      this.kickCloseTimers.push(timer);
+    }
   }
 
   destroy(): void {
     this.destroyed = true;
+    this.clearKickCloseTimers();
     this.clearPlaybackTimer();
     this.clearBotTimers();
     this.clearPlanTimer();
@@ -152,6 +164,13 @@ export class RoomSession {
     this.hostConnection = null;
     this.peer?.destroy();
     this.peer = null;
+  }
+
+  private clearKickCloseTimers(): void {
+    for (const timer of this.kickCloseTimers) {
+      clearTimeout(timer);
+    }
+    this.kickCloseTimers = [];
   }
 
   private clearPlanTimer(): void {
@@ -633,6 +652,10 @@ export class RoomSession {
       case 'error':
         this.emitError(message.message);
         break;
+      case 'kicked':
+        this.callbacks.onKicked(message.message);
+        this.destroy();
+        break;
       default:
         break;
     }
@@ -642,50 +665,18 @@ export class RoomSession {
     message: Extract<RoomMessage, { type: 'join' }>,
     connection: DataConnection,
   ): void {
-    const { name, playerId } = message;
-    const liveSeat = this.state.players.find((player) => player.id === playerId && player.connected);
-    if (liveSeat) {
-      this.send({ type: 'error', message: 'That egg is already in the carton.' }, connection);
+    const result = applyJoinRequest(this.state.players, message, {
+      phase: this.state.phase,
+      maxPlayers: cartonSpec(this.state.cartonType).maxPlayers,
+    });
+    if (!result.ok) {
+      this.send({ type: 'error', message: result.error }, connection);
       connection.close();
       return;
     }
-    const activeCount = this.state.players.filter((player) => player.connected).length;
-    const duplicateName = this.state.players.some(
-      (player) => player.connected && player.name.toLowerCase() === name.toLowerCase(),
-    );
-    if (duplicateName) {
-      this.send({ type: 'error', message: 'That egg name is already taken.' }, connection);
-      connection.close();
-      return;
-    }
-    const disconnectedSeat = this.state.players.find(
-      (player) =>
-        !player.connected &&
-        (player.name.toLowerCase() === name.toLowerCase() || player.id === playerId),
-    );
-    let nextPlayer: Player;
-    if (disconnectedSeat) {
-      nextPlayer = {
-        ...disconnectedSeat,
-        connected: true,
-      };
-      this.state.players = this.state.players.map((player) =>
-        player.id === disconnectedSeat.id ? nextPlayer : player,
-      );
-    } else {
-      if (activeCount >= cartonSpec(this.state.cartonType).maxPlayers) {
-        this.send({ type: 'error', message: 'This nest is full.' }, connection);
-        connection.close();
-        return;
-      }
-      if (this.state.phase !== 'lobby') {
-        this.send({ type: 'error', message: 'This scramble has already started.' }, connection);
-        connection.close();
-        return;
-      }
-      nextPlayer = createInitialPlayer(playerId, name, nextJoinOrder(this.state.players));
-      this.state.players = [...this.state.players, nextPlayer];
-    }
+
+    const { player: nextPlayer, players } = result;
+    this.state.players = players;
     this.connections.set(nextPlayer.id, connection);
     this.send(
       {
