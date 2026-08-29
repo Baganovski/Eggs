@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type Dispatch,
+  type ReactNode,
   type SetStateAction,
 } from 'react';
 import {
@@ -71,6 +72,34 @@ interface Beam {
 interface TokenBump {
   dr: number;
   dc: number;
+}
+
+function TokenSlot({
+  row,
+  col,
+  cols,
+  rows,
+  children,
+}: {
+  row: number;
+  col: number;
+  cols: number;
+  rows: number;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`arena-token-slot${col === cols - 1 ? ' is-last-col' : ''}${
+        row === rows - 1 ? ' is-last-row' : ''
+      }`}
+      style={{
+        gridRow: row + 1,
+        gridColumn: col + 1,
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
 interface Token {
@@ -1024,12 +1053,53 @@ export function Arena({
                 {pathIndex > 0 && <span className="path-index">{pathIndex}</span>}
                 {hasBlock && <BlockMark />}
                 {hasPresent && <PresentMark />}
-                {cellStains.map((_, stainIndex) => (
-                  <EggWhiteBlob key={`stain-${stainIndex}`} index={stainIndex} />
-                ))}
+                {occupants.every((token) => token.hp > 0) &&
+                  cellStains.map((_, stainIndex) => (
+                    <EggWhiteBlob key={`stain-${stainIndex}`} index={stainIndex} />
+                  ))}
               </button>
             );
           })}
+              </div>
+              <div
+                className="arena-token-layer arena-floor-layer"
+                style={{
+                  gridTemplateColumns: `repeat(${carton.cols}, 1fr)`,
+                  gridTemplateRows: `repeat(${carton.rows}, 1fr)`,
+                }}
+              >
+                {Array.from(tokensByCell.entries(), ([cellKey, occupants]) => {
+                  const down = occupants.filter((token) => token.hp <= 0);
+                  if (down.length === 0) return null;
+                  const [row, col] = cellKey.split(',').map(Number);
+                  const stepped =
+                    stains.some((stain) => stain.row === row && stain.col === col) ||
+                    occupants.some((token) => token.hp > 0);
+                  return (
+                    <TokenSlot
+                      key={`floor-${cellKey}`}
+                      row={row}
+                      col={col}
+                      rows={carton.rows}
+                      cols={carton.cols}
+                    >
+                      {down.map((token) => (
+                        <PlayerToken
+                          key={token.id}
+                          joinOrder={token.joinOrder}
+                          name={token.name}
+                          isYou={token.isYou}
+                          isDown
+                          isSteppedOn={stepped}
+                          isHit={flashIds.includes(token.id)}
+                          isShooting={shootingIds.includes(token.id)}
+                          bump={bumps[token.id]}
+                          tiltSeed={`${token.id}:${token.row}:${token.col}`}
+                        />
+                      ))}
+                    </TokenSlot>
+                  );
+                })}
               </div>
               <div
                 className="arena-token-layer"
@@ -1039,34 +1109,32 @@ export function Arena({
                 }}
               >
                 {Array.from(tokensByCell.entries(), ([cellKey, occupants]) => {
+                  const up = occupants.filter((token) => token.hp > 0);
+                  if (up.length === 0) return null;
                   const [row, col] = cellKey.split(',').map(Number);
                   return (
-                    <div
+                    <TokenSlot
                       key={cellKey}
-                      className={`arena-token-slot${
-                        col === carton.cols - 1 ? ' is-last-col' : ''
-                      }${row === carton.rows - 1 ? ' is-last-row' : ''}`}
-                      style={{
-                        gridRow: row + 1,
-                        gridColumn: col + 1,
-                      }}
+                      row={row}
+                      col={col}
+                      rows={carton.rows}
+                      cols={carton.cols}
                     >
-                      {occupants.map((token) => (
+                      {up.map((token) => (
                         <PlayerToken
                           key={token.id}
                           joinOrder={token.joinOrder}
                           name={token.name}
                           isYou={token.isYou}
-                          isDown={token.hp <= 0}
                           isHit={flashIds.includes(token.id)}
                           isShooting={shootingIds.includes(token.id)}
                           isHatched={showOutcome && token.id === winnerId}
                           bump={bumps[token.id]}
                           tiltSeed={`${token.id}:${token.row}:${token.col}`}
-                          idle={token.hp > 0 && !showOutcome}
+                          idle={!showOutcome}
                         />
                       ))}
-                    </div>
+                    </TokenSlot>
                   );
                 })}
               </div>
