@@ -2,8 +2,9 @@
 name: autopilot
 description: >-
   Keep a PR merge-ready by triaging comments, resolving clear conflicts, and
-  fixing CI in a loop, then merge (or enable auto-merge) when ready.
-disable-model-invocation: true
+  fixing CI in a loop, then merge (or enable auto-merge) when ready. Use for
+  this repo's squash-merge + GitHub Pages flow, not Cursor's generic never-merge
+  autopilot.
 ---
 
 # Autopilot

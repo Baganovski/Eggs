@@ -26,6 +26,7 @@ interface GameRoomContextValue {
   leaveRoom: () => void;
   clearNotice: () => void;
   clearError: () => void;
+  planRejectTick: number;
 }
 
 const GameRoomContext = createContext<GameRoomContextValue | null>(null);
@@ -36,6 +37,7 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [planRejectTick, setPlanRejectTick] = useState(0);
 
   const leaveRoom = useCallback(() => {
     sessionRef.current?.destroy();
@@ -60,6 +62,7 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
           onStateChange: setState,
           onNotice: setNotice,
           onError: setError,
+          onPlanRejected: () => setPlanRejectTick((tick) => tick + 1),
         });
         sessionRef.current = session;
       } catch (err) {
@@ -90,6 +93,7 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
             onStateChange: setState,
             onNotice: setNotice,
             onError: setError,
+            onPlanRejected: () => setPlanRejectTick((tick) => tick + 1),
           },
         );
         sessionRef.current = session;
@@ -134,6 +138,7 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
       leaveRoom,
       clearNotice: () => setNotice(null),
       clearError: () => setError(null),
+      planRejectTick,
     }),
     [
       state,
@@ -147,6 +152,7 @@ export function GameRoomProvider({ children }: { children: ReactNode }) {
       addBot,
       kickPlayer,
       leaveRoom,
+      planRejectTick,
     ],
   );
 

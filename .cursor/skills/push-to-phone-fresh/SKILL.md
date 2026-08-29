@@ -1,7 +1,11 @@
 ---
 name: push-to-phone-fresh
-description: Rebuild and re-serve Random Game for the phone, clearing local site data first so the phone loads a clean copy. Use only when the user explicitly asks for a fresh install, a clean install, to wipe and reinstall, or to reset the phone's app data before installing. Do NOT use for routine "push to phone" requests — use push-to-phone for those.
-disable-model-invocation: true
+description: >-
+  Rebuild and re-serve Eggs for the phone, clearing local site data first so
+  the phone loads a clean copy. Use only when the user explicitly asks for a
+  fresh install, a clean install, to wipe and reinstall, or to reset the
+  phone's app data before installing. Do NOT use for routine "push to phone"
+  requests — use push-to-phone for those.
 ---
 
 # Push to phone (fresh, wipes browser site data)
@@ -25,8 +29,7 @@ cannot run usefully on Cursor Cloud / web agents.
 
 ## Steps
 
-Run from the project root
-(`c:\Users\joeal\Documents\Development\Apps\Eggs`).
+Work from the **repo root** (the directory that contains `package.json`).
 
 1. **Warn and confirm before wiping**, unless the user has already explicitly
    confirmed the wipe in this same request. State plainly that clearing site

@@ -79,7 +79,7 @@ function bestShotForWeapon(
       }))
       .filter((entry): entry is { player: Player; dir: Direction; dist: number } => {
         if (!entry.dir) return false;
-        return entry.dist >= 1 && entry.dist <= range;
+        return entry.dist === range;
       })
       .sort((a, b) => a.dist - b.dist);
     return lined[0]?.dir ?? null;
@@ -152,14 +152,7 @@ function actionForWeapon(
   const dir = bestShotForWeapon(from, weapon, others, selfId, mapObjects, carton);
   if (!dir) return null;
   if (weapon === 'bomb') {
-    const target = others.find(
-      (player) =>
-        player.id !== selfId &&
-        isAlive(player) &&
-        directionFromRay(from, player) === dir,
-    );
-    const steps = target ? chebyshev(from, target) : WEAPON_STATS.bomb.range;
-    return { type: 'shoot', weapon, dir, steps };
+    return { type: 'shoot', weapon, dir, steps: WEAPON_STATS.bomb.range };
   }
   return { type: 'shoot', weapon, dir };
 }

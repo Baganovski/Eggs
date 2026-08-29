@@ -21,9 +21,9 @@ import {
   type RoundStartToken,
 } from '../types/game';
 import {
+  bombLandingCell,
   bombSplashCells,
   bombThrowCells,
-  cellAlongRay,
   cellsEqual,
   completePartialPlan,
   directionFromRay,
@@ -38,6 +38,7 @@ import {
   isObjectCell,
   isOnBoard,
   isReusableCard,
+  mixColors,
   neighbors8,
   parseAndValidatePlan,
   plannedPositionAfter,
@@ -54,8 +55,10 @@ import { PlayerToken } from './PlayerToken';
 interface ArenaProps {
   state: GameState;
   isHost: boolean;
+  planRejectTick: number;
   onSubmitPlan: (plan: { cardIds: [string, string]; actions: [ArenaAction, ArenaAction] }) => void;
   onReturnToLobby: () => void;
+  onPlayAgain: () => void;
 }
 
 type OverlayTone = 'active' | 'muted';
@@ -291,6 +294,7 @@ async function runPlayback(options: {
       options.setBumps({});
       options.setStatus(`Move ${actionIndex + 1} · step ${first.beat + 1}`);
     } else if (first.type === 'shot') {
+      options.setFlashIds([]);
       const shots = frame.flatMap((event) =>
         event.type === 'shot'
           ? [{ shooterId: event.shooterId, cells: shotPlaybackCells(event, options.carton) }]
@@ -398,7 +402,14 @@ function PlanTimerBar({ deadlineAt }: { deadlineAt: number | null }) {
   );
 }
 
-export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaProps) {
+export function Arena({
+  state,
+  isHost,
+  planRejectTick,
+  onSubmitPlan,
+  onReturnToLobby,
+  onPlayAgain,
+}: ArenaProps) {
   const carton = cartonSpec(state.cartonType);
   const local = state.players.find((player) => player.id === state.localPlayerId);
   const localAlive = Boolean(local && isAlive(local));
@@ -416,6 +427,23 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
   const [bumps, setBumps] = useState<Record<string, TokenBump>>({});
   const [flashIds, setFlashIds] = useState<string[]>([]);
   const [shootingIds, setShootingIds] = useState<string[]>([]);
+  const beamTints = useMemo(() => {
+    const byCell = new Map<string, string[]>();
+    for (const beam of beams) {
+      const hue = playerColor(
+        tokens.find((token) => token.id === beam.shooterId)?.joinOrder ?? 0,
+      );
+      for (const cell of beam.cells) {
+        const key = `${cell.row},${cell.col}`;
+        const hues = byCell.get(key) ?? [];
+        hues.push(hue);
+        byCell.set(key, hues);
+      }
+    }
+    return new Map(
+      [...byCell.entries()].map(([key, hues]) => [key, mixColors(hues)]),
+    );
+  }, [beams, tokens]);
   const [replayDone, setReplayDone] = useState(true);
   const [watchingLast, setWatchingLast] = useState(false);
   const [status, setStatus] = useState('');
@@ -430,7 +458,12 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
     setPendingSit([false, false]);
     setSlot(0);
     setLocalLocked(false);
-  }, [state.round, local?.id]);
+  }, [state.round, local?.id, state.planDeadlineAt]);
+
+  useEffect(() => {
+    if (!planRejectTick) return;
+    setLocalLocked(false);
+  }, [planRejectTick]);
 
   useEffect(() => {
     if (state.phase === 'playing' && state.turnPhase === 'planning') return;
@@ -600,9 +633,8 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
         return;
       }
       if (action.weapon === 'bomb') {
-        const steps = action.steps ?? WEAPON_STATS.bomb.range;
-        const end = cellAlongRay(from, action.dir, steps, carton);
-        if (!cellsEqual(end, from)) {
+        const end = bombLandingCell(from, action.dir, carton);
+        if (end && !isObjectCell(end, state.mapObjects)) {
           mark(end);
           for (const cell of bombSplashCells(end, carton, state.mapObjects)) mark(cell);
         }
@@ -754,9 +786,9 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
       const dir = directionFromRay(origin, cell);
       if (!dir) return;
       const ray = bombThrowCells(origin, dir, carton);
-      const index = ray.findIndex((step) => cellsEqual(step, cell));
-      if (index < 0) return;
-      setAction(slot, { type: 'shoot', weapon: 'bomb', dir, steps: index + 1 });
+      if (!ray.some((step) => cellsEqual(step, cell))) return;
+      if (isObjectCell(cell, state.mapObjects)) return;
+      setAction(slot, { type: 'shoot', weapon: 'bomb', dir, steps: WEAPON_STATS.bomb.range });
       return;
     }
 
@@ -884,7 +916,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
               : selectedCard?.kind === 'flamethrower'
                 ? 'Tap north, east, south, or west. The flame hits two squares ahead, and the sides of the second square. An obstacle in front stops the rest. Two damage.'
                 : selectedCard?.kind === 'bomb'
-                  ? 'Tap a cell on the line, up to 2 squares. Obstacles don’t stop the throw. The bomb hits that cell and open cardinal neighbors. Two damage.'
+                  ? 'Tap the cell exactly 2 squares away. Obstacles don’t stop the throw, but it can’t land on one. Hits that cell and open cardinal neighbors. Two damage.'
                   : selectedCard?.kind === 'shotgun'
                     ? 'Tap a cell on the line, up to 3 squares. Two damage.'
                     : selectedCard?.kind === 'rifle'
@@ -949,10 +981,7 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
               .filter((token) => token.row === row && token.col === col)
               .sort((a, b) => a.hp - b.hp);
             const cellStains = stains.filter((stain) => stain.row === row && stain.col === col);
-            const beam = beams.find((ray) => ray.cells.some((highlight) => cellsEqual(highlight, cell)));
-            const beamShooter = beam
-              ? tokens.find((token) => token.id === beam.shooterId)
-              : undefined;
+            const beamTint = beamTints.get(cellKey);
 
             return (
               <button
@@ -966,15 +995,13 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
                   walkTone === 'active' ? ' on-path' : ''
                 }${aimTone === 'active' ? ' on-aim' : ''}${
                   isValid ? ' is-valid' : ''
-                }${isOrigin ? ' is-origin' : ''}${beam ? ' on-beam' : ''}${
+                }${isOrigin ? ' is-origin' : ''}${beamTint ? ' on-beam' : ''}${
                   hasBlock ? ' has-block' : ''
                 }${hasPresent ? ' has-present' : ''}`}
                 style={
                   {
                     '--cell-row': row,
-                    ...(beamShooter
-                      ? { '--beam': playerColor(beamShooter.joinOrder) }
-                      : {}),
+                    ...(beamTint ? { '--beam': beamTint } : {}),
                   } as React.CSSProperties
                 }
                 onClick={() => handleCellClick(cell)}
@@ -1150,46 +1177,55 @@ export function Arena({ state, isHost, onSubmitPlan, onReturnToLobby }: ArenaPro
 
       {showOutcome && (
         <div className="arena-outcome">
-          <p className="arena-kicker">
-            {state.outcome.kind === 'winner'
-              ? `${winner?.name ?? 'Someone'} Hatched`
-              : 'Double yolk'}
-          </p>
-          <p className="arena-copy">
-            {state.outcome.kind === 'winner'
-              ? `${winner?.hp ?? 0} HP Left`
-              : 'Last eggs cracked on the same beat.'}
-          </p>
+          <div className="arena-outcome-banner">
+            <p className="arena-kicker">
+              {state.outcome.kind === 'winner'
+                ? `Eggsellent, ${winner?.name ?? 'someone'}!`
+                : 'Double yolk'}
+            </p>
+            <p className="arena-copy">
+              {state.outcome.kind === 'winner'
+                ? `${winner?.hp ?? 0} HP remaining`
+                : 'Last eggs cracked together.'}
+            </p>
+          </div>
         </div>
       )}
 
-      {state.phase === 'finished' && isHost && replayDone && !watchingLast && (
+      {state.phase === 'finished' && replayDone && !watchingLast && (
         <div className="replay-row">
-          <button
-            type="button"
-            className="btn btn-ghost"
-            disabled={!canReplayLast}
-            onClick={watchLastTurn}
-          >
-            Rewatch
-          </button>
-          <button type="button" className="btn btn-primary" onClick={onReturnToLobby}>
-            Back to the Nest
-          </button>
-        </div>
-      )}
-
-      {state.phase === 'finished' && !isHost && replayDone && !watchingLast && (
-        <div className="replay-row">
-          <button
-            type="button"
-            className="btn btn-ghost"
-            disabled={!canReplayLast}
-            onClick={watchLastTurn}
-          >
-            Rewatch
-          </button>
-          <p className="arena-copy">The host is calling everyone back to the nest.</p>
+          {isHost ? (
+            <>
+              <button type="button" className="btn btn-primary" onClick={onPlayAgain}>
+                Play again
+              </button>
+              <div className="replay-tools">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={!canReplayLast}
+                  onClick={watchLastTurn}
+                >
+                  Rewatch
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={onReturnToLobby}>
+                  Back to the Nest
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={!canReplayLast}
+                onClick={watchLastTurn}
+              >
+                Rewatch
+              </button>
+              <p className="arena-copy">Waiting on the host to scramble again.</p>
+            </>
+          )}
         </div>
       )}
       </div>

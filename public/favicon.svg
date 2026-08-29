@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <g transform="translate(16 16.2) scale(0.172) translate(-60 -75)">
+    <path
+      d="M60 8 C86 8 108 52 108 92 C108 124 86 142 60 142 C34 142 12 124 12 92 C12 52 34 8 60 8 Z"
+      fill="#111"
+    />
+    <g transform="translate(60 75) scale(0.78) translate(-60 -75)">
+      <path
+        d="M60 8 C86 8 108 52 108 92 C108 124 86 142 60 142 C34 142 12 124 12 92 C12 52 34 8 60 8 Z"
+        fill="#f6c7d4"
+      />
+      <ellipse cx="46" cy="52" rx="16" ry="22" fill="#fff" opacity="0.38" />
+    </g>
+  </g>
+</svg>

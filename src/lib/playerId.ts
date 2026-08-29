@@ -8,7 +8,3 @@ export function getOrCreatePlayerId(): string {
   sessionStorage.setItem(STORAGE_KEY, id);
   return id;
 }
-
-export function clearPlayerId(): void {
-  sessionStorage.removeItem(STORAGE_KEY);
-}

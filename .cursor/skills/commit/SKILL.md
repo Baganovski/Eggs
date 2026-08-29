@@ -1,6 +1,12 @@
 ---
 name: commit
-description: Bump the app version, then commit the currently staged changes with a clear, conventional message, then push, open a PR, and wait until GitHub Pages is serving that version. Use whenever asked to commit staged changes, "commit what's staged", or "make a commit". Only commits what is already staged (plus the version bump) — it does not stage other new files unless the user asks.
+description: >-
+  Bump the app version, commit currently staged changes with a v<version>
+  subject, push, open a PR, and wait until GitHub Pages is serving that
+  version. Use only when the user explicitly asks to commit staged changes,
+  "commit what's staged", or "make a commit". Only commits what is already
+  staged (plus the version bump) — it does not stage other new files unless
+  the user asks.
 disable-model-invocation: true
 ---
 
@@ -81,14 +87,22 @@ rather than assuming.
    changed** so they land in this commit:
 
    ```
-   git add package.json
+   git add package.json package-lock.json
    ```
 
    (Stage exactly the files `bump-version` reported as changed — no others.) This
    is the one intentional exception to the "only commit what's staged" rule: the
    version bump belongs with the commit it ships.
 
-3. **Review recent history** for message style so the new commit matches:
+3. **Build** so a broken bundle never gets committed or pushed:
+
+   ```
+   npm run build
+   ```
+
+   If the build fails, say so plainly, do not commit, and do not paper over it.
+
+4. **Review recent history** for message style so the new commit matches:
 
    ```
    git log --oneline -10
@@ -97,7 +111,7 @@ rather than assuming.
    Read a few recent messages to keep the voice consistent, then use the
    template below.
 
-4. **Write the message.** Use this template:
+5. **Write the message.** Use this template:
 
    - **Subject:** `v<name> - <short imperative summary>` where `<name>` is the
      new version from the bump (e.g. `v0.0.2`). Use a plain ASCII hyphen
@@ -117,7 +131,7 @@ rather than assuming.
    Do **not** add `Co-Authored-By`, `Signed-off-by`, or any other model/vendor
    trailer.
 
-5. **Commit.** Prefer a HEREDOC on bash. On PowerShell, pipe a here-string into
+6. **Commit.** Prefer a HEREDOC on bash. On PowerShell, pipe a here-string into
    `git commit -F -`:
 
    ```
@@ -143,12 +157,12 @@ rather than assuming.
    '@ | git commit -F -
    ```
 
-6. **Confirm the commit.** Run `git status` and note the new commit's hash,
+7. **Confirm the commit.** Run `git status` and note the new commit's hash,
    subject, and the old → new version. If a pre-commit hook modified files or
    the commit failed, surface that plainly and do not retry blindly — and do
    not push a failed/incomplete commit.
 
-7. **Push.** Sync the commit to its remote if one exists:
+8. **Push.** Sync the commit to its remote if one exists:
 
    ```
    git push -u origin HEAD
@@ -158,15 +172,6 @@ rather than assuming.
    is rejected (e.g. non-fast-forward), stop and tell the user rather than
    force-pushing. If there is no remote yet, report that the commit is local
    only.
-
-8. **Check CI** if `.github/workflows` exists. Before pushing you can catch
-   failures locally:
-
-   ```
-   npm run build
-   ```
-
-   If the build fails, say so plainly and don't paper over it.
 
 9. **Open a PR and ship to GitHub Pages.** A `/commit` is not done until the
    site on GitHub Pages is serving this version. This repo squash-merges PRs
@@ -196,7 +201,7 @@ rather than assuming.
 
 - ❌ Don't `git add` unstaged or untracked files unless the user asks — commit
   only what is already staged, plus the version-bump files from step 2.
-- ❌ Don't force-push, or push if the commit step failed.
+- ❌ Don't force-push, or push if the commit or build step failed.
 - ❌ Don't amend an existing commit; create a new one unless the user asks to amend.
 - ❌ Don't pass `--no-verify` or otherwise skip hooks. If a hook fails, fix the
   underlying issue or report it.
