@@ -1,6 +1,15 @@
 import { useId, useRef } from 'react';
 import { formatWeapon, WEAPON_STATS } from '../lib/arenaLogic';
-import { WEAPON_KINDS, type WeaponKind } from '../types/game';
+import type { WeaponKind } from '../types/game';
+
+const EGGSPLANATION_WEAPONS: WeaponKind[] = [
+  'pistol',
+  'slap',
+  'rifle',
+  'shotgun',
+  'bomb',
+  'flamethrower',
+];
 
 function actionDetail(kind: WeaponKind): string {
   const { range, damage } = WEAPON_STATS[kind];
@@ -100,7 +109,7 @@ export function Eggsplanation() {
                   per round. Aim a direction; shots go after the walks.
                 </p>
                 <ul className="eggsplanation-actions">
-                  {WEAPON_KINDS.map((kind) => (
+                  {EGGSPLANATION_WEAPONS.map((kind) => (
                     <li key={kind}>
                       <span className="eggsplanation-action-name">{formatWeapon(kind)}</span>
                       <span className="eggsplanation-action-stat">{actionDetail(kind)}</span>
