@@ -94,6 +94,13 @@ h3,
   align-items: center;
 }
 
+html:has(.room-shell),
+body:has(.room-shell),
+#root:has(.room-shell),
+.room-shell {
+  overflow-x: auto;
+}
+
 .app-shell::-webkit-scrollbar,
 .room-shell::-webkit-scrollbar {
   width: 0;
@@ -119,7 +126,7 @@ h3,
 }
 
 .room-main {
-  width: calc(var(--room-column) / var(--ui-zoom, 1));
+  width: var(--room-column);
   zoom: var(--ui-zoom, 1);
   display: flex;
   flex-direction: column;
@@ -925,13 +932,24 @@ h2 {
 .arena-board-wrap {
   --board-pad: 6px;
   --board-stroke: 3px;
+  --board-line: 3px;
+  --cell-line: 2px;
+  --board-radius: 18px;
+  --board-inner-radius: max(0px, calc(var(--board-radius) - var(--board-stroke) - var(--board-pad)));
+  --cell-corner-radius: max(0px, calc(var(--board-inner-radius) - var(--board-line)));
   width: min(100%, 480px);
   margin: 0;
   padding: var(--board-pad);
   background: #fff;
   border: var(--board-stroke) solid var(--ink);
-  border-radius: 18px;
+  border-radius: var(--board-radius);
   box-shadow: var(--shadow);
+  overflow: visible;
+}
+
+.arena-board-stack {
+  position: relative;
+  width: 100%;
   overflow: visible;
 }
 
@@ -941,8 +959,9 @@ h2 {
   width: 100%;
   height: auto;
   aspect-ratio: calc(var(--board-cols, 7) / var(--board-rows, 7));
-  border: 3px solid var(--ink);
-  overflow: visible;
+  border: var(--board-line) solid var(--ink);
+  border-radius: var(--board-inner-radius);
+  overflow: hidden;
 }
 
 .arena-cell {
@@ -952,8 +971,8 @@ h2 {
   min-height: 0;
   z-index: calc(var(--cell-row, 0) + 1);
   border: 0;
-  border-right: 2px solid var(--ink);
-  border-bottom: 2px solid var(--ink);
+  border-right: var(--cell-line) solid var(--ink);
+  border-bottom: var(--cell-line) solid var(--ink);
   background: var(--cream);
   padding: 0;
   cursor: pointer;
@@ -971,6 +990,22 @@ h2 {
 
 .arena-cell.is-last-row {
   border-bottom: 0;
+}
+
+.arena-cell.is-first-row.is-first-col {
+  border-top-left-radius: var(--cell-corner-radius);
+}
+
+.arena-cell.is-first-row.is-last-col {
+  border-top-right-radius: var(--cell-corner-radius);
+}
+
+.arena-cell.is-last-row.is-first-col {
+  border-bottom-left-radius: var(--cell-corner-radius);
+}
+
+.arena-cell.is-last-row.is-last-col {
+  border-bottom-right-radius: var(--cell-corner-radius);
 }
 
 .arena-cell:disabled {
@@ -1002,7 +1037,8 @@ h2 {
 .arena-cell.on-path-muted.is-valid::after,
 .arena-cell.on-aim.is-valid::after,
 .arena-cell.on-aim-muted.is-valid::after,
-.arena-cell.on-beam.is-valid::after {
+.arena-cell.on-beam.is-valid::after,
+.arena-cell.has-egg.is-valid::after {
   content: none;
 }
 
@@ -1059,6 +1095,34 @@ h2 {
   font-weight: 800;
 }
 
+.arena-token-layer {
+  position: absolute;
+  inset: var(--board-line);
+  display: grid;
+  gap: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 40;
+}
+
+.arena-token-slot {
+  position: relative;
+  overflow: visible;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  border-right: var(--cell-line) solid transparent;
+  border-bottom: var(--cell-line) solid transparent;
+}
+
+.arena-token-slot.is-last-col {
+  border-right: 0;
+}
+
+.arena-token-slot.is-last-row {
+  border-bottom: 0;
+}
+
 .arena-token {
   position: absolute;
   left: 8%;
@@ -1074,7 +1138,7 @@ h2 {
   transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%));
   transform-origin: 50% 92%;
   transition: transform 180ms ease-out;
-  z-index: 2;
+  z-index: var(--egg-plane, 1);
   filter: drop-shadow(2px 2px 0 #111);
 }
 
@@ -1097,7 +1161,6 @@ h2 {
 }
 
 .arena-token.is-down {
-  z-index: 1;
   top: 12%;
   left: 10%;
   right: 10%;
@@ -1110,7 +1173,7 @@ h2 {
 }
 
 .arena-token.is-hatched {
-  z-index: 4;
+  z-index: calc(var(--egg-plane, 1) + 8);
   transform: translate(calc(var(--bump-dc, 0) * 50%), calc(var(--bump-dr, 0) * 50%))
     scale(1.04);
   animation: chick-pop 360ms steps(1, jump-end);
@@ -1289,12 +1352,9 @@ h2 {
   }
 }
 
-.arena-token.is-bump {
-  z-index: 3;
-}
-
+.arena-token.is-bump,
 .arena-token.is-shooting {
-  z-index: 3;
+  z-index: calc(var(--egg-plane, 1) + 4);
 }
 
 .arena-token-callout {
@@ -1338,8 +1398,13 @@ h2 {
 .replay-tools {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 10px;
   align-items: stretch;
+}
+
+.replay-tools .btn {
+  padding: 8px 12px;
+  font-size: 0.88em;
 }
 
 .replay-tools .arena-copy {
@@ -1791,7 +1856,7 @@ h2 {
   }
 
   .room-main {
-    width: calc((100% - 32px) / var(--ui-zoom, 1));
+    width: calc(100% - 32px);
   }
 
   .home-main {
@@ -1956,7 +2021,7 @@ h2 {
 
   .arena-board-wrap {
     --board-pad: 4px;
-    border-radius: 14px;
+    --board-radius: 14px;
   }
 
   .arena-planner,

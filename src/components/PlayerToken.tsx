@@ -192,6 +192,7 @@ export function PlayerToken({
           '--bump-dr': bump?.dr ?? 0,
           '--bump-dc': bump?.dc ?? 0,
           '--egg-tilt': `${tilt}deg`,
+          '--egg-plane': joinOrder + 1,
         } as CSSProperties
       }
       title={
