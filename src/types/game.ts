@@ -203,6 +203,7 @@ export type RoomMessage =
   | { type: 'playerLeft'; playerId: string; players: Player[] }
   | { type: 'requestState'; playerId: string }
   | { type: 'planRejected'; message: string }
+  | { type: 'kicked'; message: string }
   | { type: 'notice'; message: string }
   | { type: 'error'; message: string };
 
@@ -211,4 +212,5 @@ export interface RoomCallbacks {
   onNotice: (message: string) => void;
   onError: (message: string) => void;
   onPlanRejected: () => void;
+  onKicked: (message: string) => void;
 }

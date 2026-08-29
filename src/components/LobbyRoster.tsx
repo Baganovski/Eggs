@@ -47,7 +47,7 @@ export function LobbyRoster({
                   {player.isHost && <span className="tag">host</span>}
                   {player.isBot && <span className="tag tag-muted">bot</span>}
                   {!player.connected && <span className="tag tag-muted">rolled off</span>}
-                  {canKick && !player.isYou && (player.isBot || !player.connected) && (
+                  {canKick && !player.isYou && (
                     <button
                       type="button"
                       className="seat-remove"
