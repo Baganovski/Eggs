@@ -6,6 +6,7 @@ interface PlayerTokenProps {
   name: string;
   isYou?: boolean;
   isDown?: boolean;
+  isSteppedOn?: boolean;
   isHit?: boolean;
   isShooting?: boolean;
   isHatched?: boolean;
@@ -104,23 +105,61 @@ function Chick({ hue }: { hue: string }) {
   );
 }
 
-function FriedEgg({ hue }: { hue: string }) {
-  const whitePath =
-    'M28 70 C22 52 38 40 54 44 C62 28 90 32 98 52 C112 56 118 78 106 96 C110 118 84 128 64 122 C42 132 18 118 22 98 C12 88 18 76 28 70 Z';
+function FriedEgg({ hue, stepped }: { hue: string; stepped?: boolean }) {
+  const whitePath = stepped
+    ? 'M18 86 C10 72 32 60 54 66 C68 52 102 54 116 70 C130 74 132 94 118 104 C122 118 92 126 66 118 C42 128 12 118 16 102 C8 94 12 86 18 86 Z'
+    : 'M28 70 C22 52 38 40 54 44 C62 28 90 32 98 52 C112 56 118 78 106 96 C110 118 84 128 64 122 C42 132 18 118 22 98 C12 88 18 76 28 70 Z';
+  const yolkPath =
+    'M46 92 C44 78 60 70 74 78 C90 72 108 84 100 96 C110 108 92 118 74 112 C56 120 38 108 46 92 Z';
+  const splatPath = 'M104 108 C102 98 116 96 122 104 C128 114 112 120 104 108 Z';
 
   return (
-    <svg viewBox="16 36 96 96" aria-hidden="true">
+    <svg viewBox={stepped ? '4 48 128 86' : '16 36 96 96'} aria-hidden="true">
+      {stepped && (
+        <>
+          <path
+            d={splatPath}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="14"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+          <path d={splatPath} fill="#fffdf6" />
+        </>
+      )}
       <path
         d={whitePath}
         fill="none"
         stroke="currentColor"
-        strokeWidth="16"
+        strokeWidth={stepped ? 18 : 16}
         strokeLinejoin="round"
+        strokeLinecap="round"
       />
       <path d={whitePath} fill="#fffdf6" />
-      <circle cx="62" cy="82" r="26" fill={hue} opacity="0.45" />
-      <circle cx="62" cy="82" r="22" fill="#f0b429" stroke="currentColor" strokeWidth="5" />
-      <ellipse cx="54" cy="74" rx="7" ry="5" fill="#fff" opacity="0.45" />
+      {stepped ? (
+        <>
+          <g transform="translate(72 94) scale(1.14) translate(-72 -94)">
+            <path d={yolkPath} fill={hue} opacity="0.38" />
+          </g>
+          <path
+            d={yolkPath}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="11"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+          <path d={yolkPath} fill="#f0b429" />
+          <ellipse cx="58" cy="88" rx="9" ry="6" fill="#fff" opacity="0.4" />
+        </>
+      ) : (
+        <>
+          <circle cx="62" cy="82" r="26" fill={hue} opacity="0.45" />
+          <circle cx="62" cy="82" r="22" fill="#f0b429" stroke="currentColor" strokeWidth="5" />
+          <ellipse cx="54" cy="74" rx="7" ry="5" fill="#fff" opacity="0.45" />
+        </>
+      )}
     </svg>
   );
 }
@@ -130,6 +169,7 @@ export function PlayerToken({
   name,
   isYou,
   isDown,
+  isSteppedOn,
   isHit,
   isShooting,
   isHatched,
@@ -150,7 +190,8 @@ export function PlayerToken({
   }
 
   const baseSeed = tiltSeed ?? `${joinOrder}:${name}`;
-  const tilt = eggTiltDeg(idlePose > 0 ? `${baseSeed}:idle:${idlePose}` : baseSeed);
+  const rawTilt = eggTiltDeg(idlePose > 0 ? `${baseSeed}:idle:${idlePose}` : baseSeed);
+  const tilt = isDown && isSteppedOn ? Math.round(rawTilt * 0.35) : rawTilt;
 
   useEffect(() => {
     if (!idleSnap) return;
@@ -183,10 +224,10 @@ export function PlayerToken({
   return (
     <span
       className={`arena-token${isYou ? ' is-you' : ''}${isDown ? ' is-down' : ''}${
-        isHit ? ' is-hit' : ''
-      }${isShooting ? ' is-shooting' : ''}${isHatched ? ' is-hatched' : ''}${
-        bump ? ' is-bump' : ''
-      }${idleSnap ? ' is-idle-snap' : ''}`}
+        isDown && isSteppedOn ? ' is-stepped' : ''
+      }${isHit ? ' is-hit' : ''}${isShooting ? ' is-shooting' : ''}${
+        isHatched ? ' is-hatched' : ''
+      }${bump ? ' is-bump' : ''}${idleSnap ? ' is-idle-snap' : ''}`}
       style={
         {
           '--bump-dr': bump?.dr ?? 0,
@@ -199,8 +240,8 @@ export function PlayerToken({
         isHatched
           ? `${name} hatched`
           : isDown
-            ? `${name} fried`
-            : isShooting
+            ? `${name} fried${isSteppedOn ? ' and stepped on' : ''}`
+          : isShooting
               ? `${name} shooting`
               : name
       }
@@ -208,7 +249,7 @@ export function PlayerToken({
       {isHatched ? (
         <Chick hue={hue} />
       ) : isDown ? (
-        <FriedEgg hue={hue} />
+        <FriedEgg hue={hue} stepped={isSteppedOn} />
       ) : (
         <svg viewBox="0 0 120 150" aria-hidden="true">
           <path

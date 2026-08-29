@@ -1105,6 +1105,10 @@ h2 {
   z-index: 40;
 }
 
+.arena-floor-layer {
+  z-index: 15;
+}
+
 .arena-token-slot {
   position: relative;
   overflow: visible;
@@ -1170,6 +1174,14 @@ h2 {
   transform-origin: 50% 50%;
   filter: drop-shadow(2px 2px 0 #111);
   opacity: 1;
+  z-index: 0;
+}
+
+.arena-token.is-down.is-stepped {
+  top: 14%;
+  left: -2%;
+  right: -2%;
+  bottom: 18%;
 }
 
 .arena-token.is-hatched {
