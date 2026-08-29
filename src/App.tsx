@@ -152,13 +152,16 @@ export function App() {
         {screen === 'create' && (
           <section className="panel home-panel">
             <form className="home-form" onSubmit={handleCreate}>
-              <label htmlFor="create-name">Your egg name</label>
+              <label htmlFor="create-egg-handle">Your egg name</label>
               <input
-                id="create-name"
+                id="create-egg-handle"
+                name="egg-handle"
                 value={playerName}
                 onChange={(event) => setPlayerName(event.target.value)}
                 placeholder="Who’s hatching?"
-                autoComplete="nickname"
+                autoComplete="eggs-handle"
+                autoCorrect="off"
+                spellCheck={false}
                 maxLength={20}
                 required
               />
@@ -187,13 +190,16 @@ export function App() {
                 maxLength={6}
                 required
               />
-              <label htmlFor="join-name">Your egg name</label>
+              <label htmlFor="join-egg-handle">Your egg name</label>
               <input
-                id="join-name"
+                id="join-egg-handle"
+                name="egg-handle"
                 value={playerName}
                 onChange={(event) => setPlayerName(event.target.value)}
                 placeholder="Who’s hatching?"
-                autoComplete="nickname"
+                autoComplete="eggs-handle"
+                autoCorrect="off"
+                spellCheck={false}
                 maxLength={20}
                 required
               />
