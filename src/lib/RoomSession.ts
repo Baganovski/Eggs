@@ -34,11 +34,6 @@ import {
   startMatch,
 } from './gameLogic';
 
-function toPublicState(state: GameState): PublicGameState {
-  const { localPlayerId: _, ...publicState } = state;
-  return publicState;
-}
-
 function withLocalId(state: PublicGameState, localPlayerId: string): GameState {
   return { ...state, localPlayerId };
 }
@@ -101,7 +96,7 @@ export class RoomSession {
       this.handleStart(this.state.localPlayerId);
       return;
     }
-    this.send({ type: 'start', startedBy: this.state.localPlayerId });
+    this.send({ type: 'start' });
   }
 
   sendPlayerAction(action: PlayerAction): void {
@@ -111,7 +106,6 @@ export class RoomSession {
     }
     this.send({
       type: 'playerAction',
-      playerId: this.state.localPlayerId,
       action,
     });
   }
@@ -279,10 +273,12 @@ export class RoomSession {
     const connection = this.connections.get(playerId);
     if (connection) {
       this.send({ type: 'error', message }, connection);
+      this.send({ type: 'planRejected', message }, connection);
       return;
     }
     if (playerId === this.state.localPlayerId) {
       this.emitError(message);
+      this.callbacks.onPlanRejected();
     }
   }
 
@@ -396,6 +392,41 @@ export class RoomSession {
   private updateState(partial: Partial<GameState>): void {
     this.state = { ...this.state, ...partial };
     this.emitState();
+  }
+
+  private playerIdForConnection(connection: DataConnection): string | null {
+    for (const [playerId, mapped] of this.connections) {
+      if (mapped === connection) return playerId;
+    }
+    return null;
+  }
+
+  private isUnavailableIdError(error: unknown): boolean {
+    return Boolean(
+      error &&
+        typeof error === 'object' &&
+        'type' in error &&
+        (error as { type: unknown }).type === 'unavailable-id',
+    );
+  }
+
+  private async claimHostPeer(roomCode: string): Promise<void> {
+    const delays = [800, 1500, 2500];
+    let lastError: unknown;
+    for (const delay of delays) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      if (this.destroyed) throw new Error('Room closed.');
+      try {
+        await this.initHostPeer(roomCode);
+        return;
+      } catch (error) {
+        lastError = error;
+        this.peer?.destroy();
+        this.peer = null;
+        if (!this.isUnavailableIdError(error) && delay === delays[delays.length - 1]) break;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('Could not reclaim the nest.');
   }
 
   private send(message: RoomMessage, target?: DataConnection): void {
@@ -546,16 +577,28 @@ export class RoomSession {
         if (this.isHost) this.handleJoin(message, connection);
         break;
       case 'start':
-        if (this.isHost) this.handleStart(message.startedBy);
+        if (this.isHost) {
+          const playerId = this.playerIdForConnection(connection);
+          if (playerId) this.handleStart(playerId);
+        }
         break;
       case 'playerAction':
-        if (this.isHost) this.handlePlayerAction(message.playerId, message.action);
+        if (this.isHost) {
+          const playerId = this.playerIdForConnection(connection);
+          if (playerId) this.handlePlayerAction(playerId, message.action);
+        }
         break;
       case 'requestState':
         if (this.isHost) {
-          this.mapConnectionToPlayer(connection, message.playerId);
+          const claimedId = message.playerId;
+          const occupant = this.state.players.find((player) => player.id === claimedId);
+          if (!occupant) break;
+          const existing = this.connections.get(claimedId);
+          if (existing && existing !== connection && existing.open) break;
+          if (occupant.connected && existing && existing !== connection) break;
+          this.mapConnectionToPlayer(connection, claimedId);
           this.send(
-            { type: 'stateSync', state: viewStateFor(this.state, message.playerId) },
+            { type: 'stateSync', state: viewStateFor(this.state, claimedId) },
             connection,
           );
           this.emitState();
@@ -581,8 +624,8 @@ export class RoomSession {
           this.emitNotice('An egg left the scramble.');
         }
         break;
-      case 'hostHandoff':
-        this.handleHostHandoff(message);
+      case 'planRejected':
+        this.callbacks.onPlanRejected();
         break;
       case 'notice':
         this.emitNotice(message.message);
@@ -600,6 +643,12 @@ export class RoomSession {
     connection: DataConnection,
   ): void {
     const { name, playerId } = message;
+    const liveSeat = this.state.players.find((player) => player.id === playerId && player.connected);
+    if (liveSeat) {
+      this.send({ type: 'error', message: 'That egg is already in the carton.' }, connection);
+      connection.close();
+      return;
+    }
     const activeCount = this.state.players.filter((player) => player.connected).length;
     const duplicateName = this.state.players.some(
       (player) => player.connected && player.name.toLowerCase() === name.toLowerCase(),
@@ -685,13 +734,12 @@ export class RoomSession {
       });
       return;
     }
-    if (this.state.phase !== 'lobby') return;
+    if (this.state.phase !== 'lobby' && this.state.phase !== 'finished') return;
     this.clearPendingPlans();
     this.clearPlaybackTimer();
     this.clearBotTimers();
     this.clearPlanTimer();
     this.state = startMatch(this.state);
-    this.broadcast({ type: 'start', startedBy });
     this.syncState();
     this.scheduleBotPlans();
     this.schedulePlanDeadline();
@@ -815,13 +863,7 @@ export class RoomSession {
     this.peer?.destroy();
     this.isHost = true;
 
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    await this.initHostPeer(this.state.roomCode);
-    this.broadcast({
-      type: 'hostHandoff',
-      newHostPlayerId: this.state.localPlayerId,
-      state: toPublicState(this.state),
-    });
+    await this.claimHostPeer(this.state.roomCode);
     this.emitState();
     this.scheduleBotPlans();
     this.schedulePlanDeadline();
@@ -884,13 +926,5 @@ export class RoomSession {
         ? lastError.message
         : 'Reconnection failed. Try rolling back into the nest.';
     this.emitError(message);
-  }
-
-  private handleHostHandoff(message: Extract<RoomMessage, { type: 'hostHandoff' }>): void {
-    this.state = withLocalId(message.state, this.state.localPlayerId);
-    this.state.hostPlayerId = message.newHostPlayerId;
-    this.isHost = message.newHostPlayerId === this.state.localPlayerId;
-    this.emitNotice('New host connected. The scramble continues.');
-    this.emitState();
   }
 }

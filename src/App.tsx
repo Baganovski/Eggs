@@ -74,6 +74,7 @@ export function App() {
     leaveRoom,
     clearNotice,
     clearError,
+    planRejectTick,
   } = useGameRoom();
 
   const [screen, setScreen] = useState<Screen>('home');
@@ -103,6 +104,7 @@ export function App() {
         onLeave={leaveRoom}
         onSubmitPlan={(plan) => sendPlayerAction({ type: 'submitPlan', ...plan })}
         onReturnToLobby={() => sendPlayerAction({ type: 'returnToLobby' })}
+        planRejectTick={planRejectTick}
         notice={notice}
         error={error}
         onDismissNotice={clearNotice}
@@ -132,7 +134,6 @@ export function App() {
             <h1 className="brand">Eggs</h1>
             <HomeEggCluster />
           </div>
-          <p className="home-lede">3 HP, 2 Moves, 1 Beat</p>
         </header>
 
         {screen === 'home' && (

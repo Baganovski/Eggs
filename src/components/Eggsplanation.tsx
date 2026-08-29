@@ -1,4 +1,16 @@
 import { useId, useRef } from 'react';
+import { formatWeapon, WEAPON_STATS } from '../lib/arenaLogic';
+import { WEAPON_KINDS, type WeaponKind } from '../types/game';
+
+function actionDetail(kind: WeaponKind): string {
+  const { range, damage } = WEAPON_STATS[kind];
+  const hit = `${damage} damage`;
+  if (kind === 'slap') return `next-door fan · ${hit}`;
+  if (kind === 'flamethrower') return `2-square fan · ${hit}`;
+  if (kind === 'bomb') return `2-away splash · ${hit}`;
+  if (!Number.isFinite(range)) return `unlimited · ${hit}`;
+  return `${range} range · ${hit}`;
+}
 
 export function Eggsplanation() {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -56,37 +68,48 @@ export function Eggsplanation() {
             </button>
           </header>
 
-          <ul className="eggsplanation-list">
-            <li className="eggsplanation-item">
-              <h3>The scramble</h3>
-              <p>
-                You’re an egg with 3 HP. Each round, pick two moves — walk, sit
-                tight, or an action. Last egg uncracked hatches.
-              </p>
-            </li>
-            <li className="eggsplanation-item">
-              <h3>Whole carton at once</h3>
-              <p>
-                Nobody waits their turn. The whole carton plans together, then
-                the scramble plays out at once.
-              </p>
-            </li>
-            <li className="eggsplanation-item">
-              <h3>Beats</h3>
-              <p>
-                On each move, walks finish first — one step per beat, together.
-                Sit holds a beat. Then the actions crack.
-              </p>
-            </li>
-            <li className="eggsplanation-item">
-              <h3>Straight before slant</h3>
-              <p>
-                If two eggs step onto the same square, the one walking
-                straight (up, down, left, or right) takes it. The diagonal
-                walker tries, then stays put.
-              </p>
-            </li>
-          </ul>
+          <div className="eggsplanation-body">
+            <ul className="eggsplanation-list">
+              <li className="eggsplanation-item">
+                <h3>The scramble</h3>
+                <p>
+                  You’re an egg with 3 HP. Each round, pick two moves — walk, sit
+                  tight, or an action. Last egg uncracked hatches.
+                </p>
+              </li>
+              <li className="eggsplanation-item">
+                <h3>Whole carton at once</h3>
+                <p>
+                  Nobody waits their turn. The whole carton plans together, then
+                  the scramble plays out at once.
+                </p>
+              </li>
+              <li className="eggsplanation-item">
+                <h3>Move order</h3>
+                <p>
+                  Walks go first — everyone steps together, one square at a
+                  time. Sit stays put. Then the actions crack.
+                </p>
+              </li>
+              <li className="eggsplanation-item">
+                <h3>Actions</h3>
+                <p>
+                  You always pack a pistol — you can fire it on both of your
+                  moves. A present adds one spare. You keep that spare until
+                  another present replaces it, but you can only fire it once
+                  per round. Aim a direction; shots go after the walks.
+                </p>
+                <ul className="eggsplanation-actions">
+                  {WEAPON_KINDS.map((kind) => (
+                    <li key={kind}>
+                      <span className="eggsplanation-action-name">{formatWeapon(kind)}</span>
+                      <span className="eggsplanation-action-stat">{actionDetail(kind)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            </ul>
+          </div>
 
           <button type="submit" className="btn btn-primary">
             Crack on

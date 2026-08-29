@@ -1,8 +1,17 @@
+import { useState, type CSSProperties } from 'react';
 import { JoinCodeBar } from './JoinCodeBar';
 import { LobbyRoster } from './LobbyRoster';
 import { CartonPicker } from './CartonPicker';
 import { Arena } from './Arena';
 import { Toast } from './Toast';
+import {
+  clampZoom,
+  readDeviceZoom,
+  writeDeviceZoom,
+  ZOOM_MAX,
+  ZOOM_MIN,
+  ZOOM_STEP,
+} from '../lib/deviceZoom';
 import { cartonSpec, MIN_PLAYERS, type ArenaAction, type CartonType, type GameState } from '../types/game';
 
 interface RoomShellProps {
@@ -17,6 +26,7 @@ interface RoomShellProps {
   onLeave: () => void;
   onSubmitPlan: (plan: { cardIds: [string, string]; actions: [ArenaAction, ArenaAction] }) => void;
   onReturnToLobby: () => void;
+  planRejectTick: number;
   notice: string | null;
   error: string | null;
   onDismissNotice: () => void;
@@ -49,6 +59,7 @@ export function RoomShell({
   onLeave,
   onSubmitPlan,
   onReturnToLobby,
+  planRejectTick,
   notice,
   error,
   onDismissNotice,
@@ -56,10 +67,24 @@ export function RoomShell({
 }: RoomShellProps) {
   const { phase } = state;
   const carton = cartonSpec(state.cartonType);
+  const [zoom, setZoom] = useState(readDeviceZoom);
+
+  const setDeviceZoom = (next: number) => {
+    const clamped = clampZoom(next);
+    setZoom(clamped);
+    writeDeviceZoom(clamped);
+  };
 
   return (
-    <div className="room-shell">
-      <JoinCodeBar code={state.roomCode} onLeave={onLeave} />
+    <div className="room-shell" style={{ '--ui-zoom': String(zoom) } as CSSProperties}>
+      <JoinCodeBar
+        code={state.roomCode}
+        onLeave={onLeave}
+        canZoomOut={zoom > ZOOM_MIN}
+        canZoomIn={zoom < ZOOM_MAX}
+        onZoomOut={() => setDeviceZoom(zoom - ZOOM_STEP)}
+        onZoomIn={() => setDeviceZoom(zoom + ZOOM_STEP)}
+      />
 
       <main className={`room-main${phase !== 'lobby' ? ' is-arena' : ''}`}>
         {phase === 'lobby' ? (
@@ -118,8 +143,10 @@ export function RoomShell({
             <Arena
               state={state}
               isHost={isHost}
+              planRejectTick={planRejectTick}
               onSubmitPlan={onSubmitPlan}
               onReturnToLobby={onReturnToLobby}
+              onPlayAgain={onStart}
             />
           </section>
         )}

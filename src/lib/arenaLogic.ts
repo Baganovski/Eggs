@@ -162,38 +162,17 @@ export function bombSplashCells(
   }).filter((cell) => isOnBoard(cell, carton) && !isObjectCell(cell, mapObjects));
 }
 
-export function cellAlongRay(
-  from: Cell,
-  dir: Direction,
-  steps: number,
-  carton: CartonSpec,
-): Cell {
+export function bombLandingCell(from: Cell, dir: Direction, carton: CartonSpec): Cell | null {
+  const range = WEAPON_STATS.bomb.range;
   const { dr, dc } = DIR_DELTA[dir];
-  let cell = { ...from };
-  for (let i = 0; i < steps; i += 1) {
-    const next = { row: cell.row + dr, col: cell.col + dc };
-    if (!isOnBoard(next, carton)) break;
-    cell = next;
-  }
-  return cell;
+  const end = { row: from.row + dr * range, col: from.col + dc * range };
+  if (!isOnBoard(end, carton)) return null;
+  return end;
 }
 
-export function bombThrowCells(
-  from: Cell,
-  dir: Direction,
-  carton: CartonSpec,
-  maxRange = WEAPON_STATS.bomb.range,
-): Cell[] {
-  const { dr, dc } = DIR_DELTA[dir];
-  const cells: Cell[] = [];
-  let row = from.row + dr;
-  let col = from.col + dc;
-  while (isOnBoard({ row, col }, carton) && cells.length < maxRange) {
-    cells.push({ row, col });
-    row += dr;
-    col += dc;
-  }
-  return cells;
+export function bombThrowCells(from: Cell, dir: Direction, carton: CartonSpec): Cell[] {
+  const end = bombLandingCell(from, dir, carton);
+  return end ? [end] : [];
 }
 
 export function walkDelay(action: ArenaAction | null | undefined): number {
@@ -253,6 +232,34 @@ const PLAYBACK_MS: Record<PlaybackEvent['type'], number> = {
 
 export function playerColor(joinOrder: number): string {
   return PLAYER_HUES[joinOrder % PLAYER_HUES.length];
+}
+
+function parseHexColor(hex: string): [number, number, number] | null {
+  const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!match) return null;
+  const value = Number.parseInt(match[1], 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+export function mixColors(colors: string[]): string {
+  const unique = [...new Set(colors)];
+  if (unique.length === 0) return PLAYER_HUES[0];
+  if (unique.length === 1) return unique[0] ?? PLAYER_HUES[0];
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let count = 0;
+  for (const color of unique) {
+    const rgb = parseHexColor(color);
+    if (!rgb) continue;
+    r += rgb[0];
+    g += rgb[1];
+    b += rgb[2];
+    count += 1;
+  }
+  if (count === 0) return unique[0] ?? PLAYER_HUES[0];
+  const channel = (sum: number) => Math.round(sum / count).toString(16).padStart(2, '0');
+  return `#${channel(r)}${channel(g)}${channel(b)}`;
 }
 
 export function isAlive(player: Player): boolean {
@@ -439,10 +446,10 @@ function parseAction(value: unknown, carton: CartonSpec): ArenaAction | null {
     const parsed: ArenaAction = { type: 'shoot', weapon: action.weapon, dir: action.dir };
     if (action.weapon === 'bomb') {
       const steps = action.steps;
-      if (steps !== undefined) {
-        if (!Number.isInteger(steps) || steps < 1 || steps > WEAPON_STATS.bomb.range) return null;
-        parsed.steps = steps;
+      if (steps !== undefined && (!Number.isInteger(steps) || steps !== WEAPON_STATS.bomb.range)) {
+        return null;
       }
+      parsed.steps = WEAPON_STATS.bomb.range;
     }
     return parsed;
   }
@@ -488,6 +495,10 @@ export function parseAndValidatePlan(
     if (action.type === 'walk') {
       if (!isWalkLegal(position, action.path, mapObjects, carton, walkDelay(action))) return null;
       position = action.path[action.path.length - 1];
+    }
+    if (action.type === 'shoot' && action.weapon === 'bomb') {
+      const end = bombLandingCell(position, action.dir, carton);
+      if (!end || isObjectCell(end, mapObjects)) return null;
     }
   }
   return [first, second];
@@ -574,11 +585,13 @@ export function emptyArenaFields(): Pick<
 
 export function startArenaMatch(state: GameState): GameState {
   const carton = cartonSpec(state.cartonType);
-  const seated = [...state.players].sort((a, b) => a.joinOrder - b.joinOrder);
+  const seated = [...state.players]
+    .filter((player) => player.connected)
+    .sort((a, b) => a.joinOrder - b.joinOrder);
   const startById = new Map(
     seated.map((player, index) => [player.id, carton.starts[index] ?? carton.starts[0]]),
   );
-  const players = state.players.map((player) => {
+  const players = seated.map((player) => {
     const corner = startById.get(player.id) ?? carton.starts[0];
     return {
       ...player,
@@ -731,6 +744,61 @@ function addHit(hits: Map<string, number>, playerId: string, damage: number): vo
   hits.set(playerId, (hits.get(playerId) ?? 0) + damage);
 }
 
+export interface PlaybackShot {
+  shooterId: string;
+  joinOrder: number;
+  damages: { playerId: string; amount: number }[];
+}
+
+export function orderShotsForPlayback<T extends PlaybackShot>(
+  shots: T[],
+  startHp: Map<string, number>,
+): T[] {
+  if (shots.length <= 1) return shots;
+  const byShooter = new Map(shots.map((shot) => [shot.shooterId, shot]));
+  const remaining = new Set(shots.map((shot) => shot.shooterId));
+  const hp = new Map(startHp);
+  const ordered: T[] = [];
+  const queue: string[] = [];
+
+  const takeNext = (): string | undefined => {
+    while (queue.length > 0) {
+      const id = queue.shift();
+      if (id && remaining.has(id)) return id;
+    }
+    return [...remaining].sort((a, b) => {
+      const left = byShooter.get(a)?.joinOrder ?? 0;
+      const right = byShooter.get(b)?.joinOrder ?? 0;
+      return left - right;
+    })[0];
+  };
+
+  while (remaining.size > 0) {
+    const id = takeNext();
+    if (!id) break;
+    remaining.delete(id);
+    const shot = byShooter.get(id);
+    if (!shot) break;
+    ordered.push(shot);
+    const killed: PlaybackShot[] = [];
+    for (const damage of shot.damages) {
+      const before = hp.get(damage.playerId) ?? 0;
+      const after = Math.max(0, before - damage.amount);
+      hp.set(damage.playerId, after);
+      if (before > 0 && after === 0) {
+        const victim = byShooter.get(damage.playerId);
+        if (victim) killed.push(victim);
+      }
+    }
+    killed.sort((a, b) => a.joinOrder - b.joinOrder);
+    for (let index = killed.length - 1; index >= 0; index -= 1) {
+      const victimId = killed[index]?.shooterId;
+      if (victimId && remaining.has(victimId)) queue.unshift(victimId);
+    }
+  }
+  return ordered;
+}
+
 interface Intent {
   id: string;
   from: Cell;
@@ -826,7 +894,7 @@ function resolveMovement(
       to: intent.to,
     });
     if (hasFriedEggAt(players, intent.from)) {
-      const stain = { row: intent.to.row, col: intent.to.col };
+      const stain = { row: intent.from.row, col: intent.from.col };
       eggStains.push(stain);
       timeline.push({ type: 'eggStain', cell: stain });
     }
@@ -974,11 +1042,18 @@ export function resolveRound(
     const fireShots = () => {
       const snapshot = nextPlayers.map((player) => ({ ...player }));
       const hits = new Map<string, number>();
+      const built: (PlaybackShot & { event: Extract<PlaybackEvent, { type: 'shot' }> })[] = [];
+
+      const recordDamage = (damages: Map<string, number>, playerId: string, amount: number) => {
+        damages.set(playerId, (damages.get(playerId) ?? 0) + amount);
+        addHit(hits, playerId, amount);
+      };
 
       for (const player of living(snapshot)) {
         const action = plans.get(player.id)?.[actionIndex];
         if (action?.type !== 'shoot') continue;
         const from = { row: player.row, col: player.col };
+        const damages = new Map<string, number>();
 
         const fan = weaponFanCells(action.weapon, from, action.dir, carton, mapObjects);
         if (fan) {
@@ -991,43 +1066,53 @@ export function resolveRound(
             action.weapon === 'flamethrower' && isOnBoard(second, carton)
               ? second
               : (fan[1] ?? fan[0] ?? from);
-          timeline.push({
-            type: 'shot',
-            shooterId: player.id,
-            weapon: action.weapon,
-            dir: action.dir,
-            from,
-            end: tip,
-            fan,
-            hitPlayerId: struck[0]?.id,
-          });
           for (const target of struck) {
-            addHit(hits, target.id, WEAPON_STATS[action.weapon].damage);
+            recordDamage(damages, target.id, WEAPON_STATS[action.weapon].damage);
           }
+          built.push({
+            shooterId: player.id,
+            joinOrder: player.joinOrder,
+            damages: [...damages.entries()].map(([playerId, amount]) => ({ playerId, amount })),
+            event: {
+              type: 'shot',
+              shooterId: player.id,
+              weapon: action.weapon,
+              dir: action.dir,
+              from,
+              end: tip,
+              fan,
+              hitPlayerId: struck[0]?.id,
+            },
+          });
           continue;
         }
 
         if (action.weapon === 'bomb') {
           const stats = WEAPON_STATS.bomb;
-          const steps = action.steps ?? stats.range;
-          const end = cellAlongRay(from, action.dir, steps, carton);
+          const end = bombLandingCell(from, action.dir, carton);
+          if (!end || isObjectCell(end, mapObjects)) continue;
           const splash = bombSplashCells(end, carton, mapObjects);
           const landed = occupantAt(snapshot, end);
-          timeline.push({
-            type: 'shot',
-            shooterId: player.id,
-            weapon: action.weapon,
-            dir: action.dir,
-            from,
-            end,
-            splash,
-            hitPlayerId: landed?.id,
-          });
-          if (landed) addHit(hits, landed.id, stats.damage);
+          if (landed) recordDamage(damages, landed.id, stats.damage);
           for (const cell of splash) {
             const splashed = occupantAt(snapshot, cell);
-            if (splashed) addHit(hits, splashed.id, stats.damage);
+            if (splashed) recordDamage(damages, splashed.id, stats.damage);
           }
+          built.push({
+            shooterId: player.id,
+            joinOrder: player.joinOrder,
+            damages: [...damages.entries()].map(([playerId, amount]) => ({ playerId, amount })),
+            event: {
+              type: 'shot',
+              shooterId: player.id,
+              weapon: action.weapon,
+              dir: action.dir,
+              from,
+              end,
+              splash,
+              hitPlayerId: landed?.id,
+            },
+          });
           continue;
         }
 
@@ -1041,29 +1126,45 @@ export function resolveRound(
           stats.range,
           carton,
         );
-        timeline.push({
-          type: 'shot',
+        if (hit) recordDamage(damages, hit.id, stats.damage);
+        built.push({
           shooterId: player.id,
-          weapon: action.weapon,
-          dir: action.dir,
-          from,
-          end,
-          hitPlayerId: hit?.id,
+          joinOrder: player.joinOrder,
+          damages: [...damages.entries()].map(([playerId, amount]) => ({ playerId, amount })),
+          event: {
+            type: 'shot',
+            shooterId: player.id,
+            weapon: action.weapon,
+            dir: action.dir,
+            from,
+            end,
+            hitPlayerId: hit?.id,
+          },
         });
-        if (hit) addHit(hits, hit.id, stats.damage);
       }
 
-      if (hits.size === 0) return;
-      nextPlayers = nextPlayers.map((player) => {
-        const damage = hits.get(player.id);
-        if (!damage) return player;
-        const hpAfter = Math.max(0, player.hp - damage);
-        timeline.push({ type: 'hit', playerId: player.id, hpAfter });
-        if (hpAfter === 0 && player.hp > 0) {
-          timeline.push({ type: 'death', playerId: player.id });
+      if (hits.size > 0) {
+        nextPlayers = nextPlayers.map((player) => {
+          const damage = hits.get(player.id);
+          if (!damage) return player;
+          return { ...player, hp: Math.max(0, player.hp - damage) };
+        });
+      }
+
+      const startHp = new Map(snapshot.map((player) => [player.id, player.hp]));
+      let runningHp = new Map(startHp);
+      for (const shot of orderShotsForPlayback(built, startHp)) {
+        timeline.push(shot.event);
+        for (const damage of shot.damages) {
+          const before = runningHp.get(damage.playerId) ?? 0;
+          const after = Math.max(0, before - damage.amount);
+          runningHp.set(damage.playerId, after);
+          timeline.push({ type: 'hit', playerId: damage.playerId, hpAfter: after });
+          if (before > 0 && after === 0) {
+            timeline.push({ type: 'death', playerId: damage.playerId });
+          }
         }
-        return { ...player, hp: hpAfter };
-      });
+      }
     };
 
     for (let beat = 0; beat < moveBeats; beat += 1) {
@@ -1107,6 +1208,7 @@ export function resolveRound(
       takePresents();
     }
     fireShots();
+    takePresents();
   }
 
   return {
@@ -1171,7 +1273,7 @@ export function groupTimeline(timeline: PlaybackEvent[]): PlaybackEvent[][] {
 
   for (const event of timeline) {
     const kind = kindOf(event);
-    if (kind === 'actionStart' || kind === 'beat') {
+    if (kind === 'actionStart' || kind === 'beat' || kind === 'shot') {
       if (current.length > 0) {
         frames.push(current);
         current = [];

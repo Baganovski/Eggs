@@ -1,7 +1,12 @@
 ---
 name: push-to-phone
-description: Serve the latest Random Game build so it can be opened on a phone on the same network WITHOUT wiping anything. This is the DEFAULT for push/install/deploy requests. Use whenever asked to push/install/deploy a new version to the phone, update the app on the device, or "get this onto my phone" — unless the user explicitly asks for a fresh/clean install, in which case use push-to-phone-fresh instead.
-disable-model-invocation: true
+description: >-
+  Serve the latest Eggs build so it can be opened on a phone on the same
+  network WITHOUT wiping anything. Default for push/install/deploy requests.
+  Use when asked to push, install, or deploy a new version to the phone, update
+  the app on the device, or "get this onto my phone" — unless the user
+  explicitly asks for a fresh/clean install, in which case use
+  push-to-phone-fresh instead.
 ---
 
 # Push to phone (data-preserving)
@@ -17,8 +22,7 @@ cannot run usefully on Cursor Cloud / web agents.
 
 ## Steps
 
-Run from the project root
-(`c:\Users\joeal\Documents\Development\Apps\Eggs`).
+Work from the **repo root** (the directory that contains `package.json`).
 
 1. **Build** so the phone gets current code:
    ```
@@ -47,5 +51,5 @@ Run from the project root
 - ❌ `git add` / `git commit` / `git push` — this skill only builds and serves.
   The user commits manually; never create a commit as a side effect of pushing
   to the phone, even if there are staged or uncommitted changes. If the user
-  separately wants a commit, they'll ask (see the [`commit`](../commit/SKILL.md)
-  skill).
+  separately wants a commit, they'll ask (see the
+  [`commit`](../commit/SKILL.md) skill).

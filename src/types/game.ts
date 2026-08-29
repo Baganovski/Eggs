@@ -1,6 +1,5 @@
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 4;
-export const BOARD_SIZE = 7;
 export const STARTING_HP = 3;
 export const MAX_WALK_STEPS = 3;
 export const PLAN_TIME_MS = 30_000;
@@ -198,12 +197,12 @@ export type RoomMessage =
   | { type: 'join'; name: string; playerId: string }
   | { type: 'joinAck'; playerId: string; state: PublicGameState }
   | { type: 'lobbyUpdate'; players: Player[]; cartonType: CartonType }
-  | { type: 'start'; startedBy: string }
+  | { type: 'start' }
   | { type: 'stateSync'; state: PublicGameState }
-  | { type: 'playerAction'; playerId: string; action: PlayerAction }
+  | { type: 'playerAction'; action: PlayerAction }
   | { type: 'playerLeft'; playerId: string; players: Player[] }
-  | { type: 'hostHandoff'; newHostPlayerId: string; state: PublicGameState }
   | { type: 'requestState'; playerId: string }
+  | { type: 'planRejected'; message: string }
   | { type: 'notice'; message: string }
   | { type: 'error'; message: string };
 
@@ -211,4 +210,5 @@ export interface RoomCallbacks {
   onStateChange: (state: GameState) => void;
   onNotice: (message: string) => void;
   onError: (message: string) => void;
+  onPlanRejected: () => void;
 }
