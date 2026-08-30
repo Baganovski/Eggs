@@ -11,6 +11,7 @@ import { MIN_PLAYERS, PLAN_DEADLINE_GRACE_MS, cartonSpec } from '../types/game';
 import {
   applyResolvedRound,
   beginPlanningRound,
+  closedMapObjects,
   isAlive,
   parseAndValidatePlan,
   playbackDurationMs,
@@ -274,12 +275,14 @@ export class RoomSession {
   private submitBotPlan(playerId: string): void {
     const player = this.state.players.find((entry) => entry.id === playerId);
     if (!player?.isBot) return;
+    const carton = cartonSpec(this.state.cartonType);
     const plan = chooseBotPlan(
       player,
       this.state.players,
-      this.state.mapObjects,
+      closedMapObjects(this.state.mapObjects, this.state.shrinkIndex ?? 0, carton),
       this.state.presents ?? [],
-      cartonSpec(this.state.cartonType),
+      carton,
+      this.state.shrinkIndex ?? 0,
     );
     this.handlePlayerAction(playerId, {
       type: 'submitPlan',
@@ -335,13 +338,17 @@ export class RoomSession {
 
     if (this.latePlanTimer !== null && this.forcedPlans.size > 0) return;
 
+    const carton = cartonSpec(this.state.cartonType);
     const result = resolveRound(
       this.state.players,
       this.pendingPlans,
       this.state.mapObjects,
       this.state.eggStains ?? [],
       this.state.presents ?? [],
-      cartonSpec(this.state.cartonType),
+      carton,
+      this.state.shrinkIndex ?? 0,
+      this.state.round,
+      this.state.startedPlayerCount || this.state.players.length,
     );
     this.clearPendingPlans();
     this.state = applyResolvedRound(this.state, result);
@@ -369,12 +376,13 @@ export class RoomSession {
     const replaceable = this.forcedPlans.has(playerId);
     if ((player.planSubmitted || this.pendingPlans.has(playerId)) && !replaceable) return;
 
+    const carton = cartonSpec(this.state.cartonType);
     const plan = parseAndValidatePlan(
       player,
       action.actions,
       action.cardIds,
-      this.state.mapObjects,
-      cartonSpec(this.state.cartonType),
+      closedMapObjects(this.state.mapObjects, this.state.shrinkIndex ?? 0, carton),
+      carton,
     );
     if (!plan) {
       this.rejectPlan(playerId, 'That scramble is not legal.');

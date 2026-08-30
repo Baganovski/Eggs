@@ -101,6 +101,18 @@ export function Eggsplanation() {
                 </p>
               </li>
               <li className="eggsplanation-item">
+                <h3>Closing carton</h3>
+                <p>
+                  On the 7×7, once two eggs remain the whole outer border
+                  turns red after a scramble, then black the next one — unless
+                  you started as a pair, in which case it waits until the third
+                  scramble. After the carton is a 3×3, the bottom three squares
+                  turn red, then black, leaving a 2×3 lane in the middle. Black
+                  squares fry anyone still on them. Presents only appear two
+                  squares from an egg; if there’s no room, none spawn.
+                </p>
+              </li>
+              <li className="eggsplanation-item">
                 <h3>Actions</h3>
                 <p>
                   You always pack a pistol — you can fire it on both of your
