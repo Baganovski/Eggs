@@ -135,7 +135,9 @@ export type PlaybackEvent =
   | { type: 'move'; playerId: string; from: Cell; to: Cell }
   | { type: 'eggStain'; cell: Cell }
   | { type: 'blocked'; playerId: string; from: Cell; attempted: Cell }
-  | { type: 'pickup'; playerId: string; cell: Cell; weapon: WeaponKind };
+  | { type: 'pickup'; playerId: string; cell: Cell; weapon: WeaponKind }
+  | { type: 'shrinkWarn'; cells: Cell[] }
+  | { type: 'shrinkDestroy'; cells: Cell[] };
 
 export interface RoundStartToken {
   id: string;
@@ -150,6 +152,7 @@ export interface LastReplay {
   roundStart: RoundStartToken[];
   startEggStains: Cell[];
   startPresents: Cell[];
+  startShrinkIndex: number;
 }
 
 export interface Player {
@@ -179,6 +182,8 @@ export interface GameState {
   mapObjects: Cell[];
   eggStains: Cell[];
   presents: Cell[];
+  shrinkIndex: number;
+  startedPlayerCount: number;
   players: Player[];
   hostPlayerId: string;
   localPlayerId: string;

@@ -1038,7 +1038,8 @@ h2 {
 .arena-cell.on-aim.is-valid::after,
 .arena-cell.on-aim-muted.is-valid::after,
 .arena-cell.on-beam.is-valid::after,
-.arena-cell.has-egg.is-valid::after {
+.arena-cell.has-egg.is-valid::after,
+.arena-cell.is-closed.is-valid::after {
   content: none;
 }
 
@@ -1057,6 +1058,37 @@ h2 {
 
 .arena-cell.has-block.shade {
   background: #bb9d78;
+}
+
+.arena-cell.is-warn,
+.arena-cell.is-warn.on-path,
+.arena-cell.is-warn.on-path-muted,
+.arena-cell.is-warn.on-aim,
+.arena-cell.is-warn.on-aim-muted,
+.arena-cell.is-warn.on-beam,
+.arena-cell.is-warn.has-block {
+  background: #ff6d52;
+}
+
+.arena-cell.is-warn.shade,
+.arena-cell.is-warn.has-block.shade {
+  background: #e84830;
+}
+
+.arena-cell.is-closed,
+.arena-cell.is-closed.on-path,
+.arena-cell.is-closed.on-path-muted,
+.arena-cell.is-closed.on-aim,
+.arena-cell.is-closed.on-aim-muted,
+.arena-cell.is-closed.on-beam,
+.arena-cell.is-closed.has-block,
+.arena-cell.is-closed.is-warn {
+  background: #3a3a3a;
+}
+
+.arena-cell.is-closed.shade,
+.arena-cell.is-closed.has-block.shade {
+  background: #2c2c2c;
 }
 
 .arena-block {

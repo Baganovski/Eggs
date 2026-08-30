@@ -26,6 +26,7 @@ import {
   bombSplashCells,
   bombThrowCells,
   cellsEqual,
+  closedMapObjects,
   completePartialPlan,
   directionFromRay,
   eventDurationMs,
@@ -46,6 +47,8 @@ import {
   playerColor,
   shotPlaybackCells,
   shotRayCells,
+  shrinkDestroyedCells,
+  shrinkWarningCells,
   validShootCells,
   walkDelay,
   weaponFanCells,
@@ -240,6 +243,36 @@ function planBeatNumbers(
   return numbers;
 }
 
+interface HazardView {
+  destroyed: Cell[];
+  warning: Cell[];
+}
+
+function hazardFromIndex(index: number, carton: CartonSpec): HazardView {
+  return {
+    destroyed: shrinkDestroyedCells(index, carton),
+    warning: shrinkWarningCells(index, carton),
+  };
+}
+
+function applyHazardEvent(hazard: HazardView, event: PlaybackEvent): HazardView {
+  if (event.type === 'shrinkDestroy') {
+    const extra = event.cells.filter(
+      (cell) => !hazard.destroyed.some((closed) => cellsEqual(closed, cell)),
+    );
+    return {
+      destroyed: [...hazard.destroyed, ...extra],
+      warning: hazard.warning.filter(
+        (cell) => !event.cells.some((closed) => cellsEqual(closed, cell)),
+      ),
+    };
+  }
+  if (event.type === 'shrinkWarn') {
+    return { ...hazard, warning: event.cells };
+  }
+  return hazard;
+}
+
 function applyEvent(tokens: Token[], event: PlaybackEvent): Token[] {
   switch (event.type) {
     case 'move':
@@ -292,10 +325,12 @@ async function runPlayback(options: {
   startTokens: Token[];
   startStains: Cell[];
   startPresents: Cell[];
+  startHazard: HazardView;
   cancelled: () => boolean;
   setTokens: (tokens: Token[]) => void;
   setStains: (stains: Cell[]) => void;
   setPresents: (presents: Cell[]) => void;
+  setHazard: (hazard: HazardView) => void;
   setBeams: (beams: Beam[]) => void;
   setBumps: (bumps: Record<string, TokenBump>) => void;
   setFlashIds: (ids: string[]) => void;
@@ -306,6 +341,7 @@ async function runPlayback(options: {
   let current = options.startTokens;
   let stains = options.startStains;
   let presents = options.startPresents;
+  let hazard = options.startHazard;
   let actionIndex = 0;
   for (const frame of groupTimeline(options.timeline)) {
     if (options.cancelled()) return;
@@ -345,6 +381,10 @@ async function runPlayback(options: {
         return `${name} unwraps ${formatWeapon(event.weapon)}`;
       });
       options.setStatus(`Move ${actionIndex + 1} · ${labels.join(' · ')}`);
+    } else if (first.type === 'shrinkDestroy') {
+      options.setStatus('The carton closes in');
+    } else if (first.type === 'shrinkWarn') {
+      options.setStatus('This square is next');
     }
 
     const blocked = frame.flatMap((event) => (event.type === 'blocked' ? [event] : []));
@@ -360,6 +400,11 @@ async function runPlayback(options: {
       const taken = new Set(pickups.map((event) => `${event.cell.row},${event.cell.col}`));
       presents = presents.filter((cell) => !taken.has(`${cell.row},${cell.col}`));
       options.setPresents(presents);
+    }
+    const nextHazard = frame.reduce(applyHazardEvent, hazard);
+    if (nextHazard !== hazard) {
+      hazard = nextHazard;
+      options.setHazard(hazard);
     }
 
     if (blocked.length > 0) {
@@ -452,6 +497,9 @@ export function Arena({
   const [tokens, setTokens] = useState<Token[]>(() => tokensFromState(state));
   const [stains, setStains] = useState<Cell[]>(() => state.eggStains ?? []);
   const [presents, setPresents] = useState<Cell[]>(() => state.presents ?? []);
+  const [hazard, setHazard] = useState<HazardView>(() =>
+    hazardFromIndex(state.shrinkIndex ?? 0, carton),
+  );
   const [beams, setBeams] = useState<Beam[]>([]);
   const [bumps, setBumps] = useState<Record<string, TokenBump>>({});
   const [flashIds, setFlashIds] = useState<string[]>([]);
@@ -507,13 +555,14 @@ export function Arena({
     setTokens(tokensFromState(state));
     setStains(state.eggStains ?? []);
     setPresents(state.presents ?? []);
+    setHazard(hazardFromIndex(state.shrinkIndex ?? 0, carton));
     setBeams([]);
     setBumps({});
     setFlashIds([]);
     setShootingIds([]);
     setReplayDone(true);
     setStatus('');
-  }, [state.players, state.turnPhase, state.timeline.length, state.eggStains, state.presents, watchingLast]);
+  }, [state.players, state.turnPhase, state.timeline.length, state.eggStains, state.presents, state.shrinkIndex, watchingLast]);
 
   const playbackKey = `${state.round}:${state.turnPhase}:${JSON.stringify(state.timeline)}`;
 
@@ -532,8 +581,10 @@ export function Arena({
     setTokens(tokensFromSnapshot(state, state.roundStart));
     const startStains = state.lastReplay?.startEggStains ?? [];
     const startPresents = state.lastReplay?.startPresents ?? [];
+    const startHazard = hazardFromIndex(state.lastReplay?.startShrinkIndex ?? 0, carton);
     setStains(startStains);
     setPresents(startPresents);
+    setHazard(startHazard);
     setBeams([]);
     setBumps({});
     setFlashIds([]);
@@ -545,10 +596,12 @@ export function Arena({
         startTokens: tokensFromSnapshot(state, state.roundStart),
         startStains,
         startPresents,
+        startHazard,
         cancelled: () => cancelled,
         setTokens,
         setStains,
         setPresents,
+        setHazard,
         setBeams,
         setBumps,
         setFlashIds,
@@ -560,6 +613,7 @@ export function Arena({
       setTokens(tokensFromState(state));
       setStains(state.eggStains ?? []);
       setPresents(state.presents ?? []);
+      setHazard(hazardFromIndex(state.shrinkIndex ?? 0, carton));
       setBeams([]);
       setBumps({});
       setFlashIds([]);
@@ -608,15 +662,19 @@ export function Arena({
     return MAX_WALK_STEPS;
   };
 
+  const blockers = useMemo(
+    () => closedMapObjects(state.mapObjects, state.shrinkIndex ?? 0, carton),
+    [state.mapObjects, state.shrinkIndex, carton],
+  );
   const walkPath = draft[slot]?.type === 'walk' ? draft[slot].path : [];
   const walkTip = walkPath[walkPath.length - 1] ?? origin;
   const validWalk =
     canPlan && editingMove && walkPath.length < maxWalkFor(slot)
-      ? neighbors8(walkTip, carton).filter((cell) => !isObjectCell(cell, state.mapObjects))
+      ? neighbors8(walkTip, carton).filter((cell) => !isObjectCell(cell, blockers))
       : [];
   const validShoot =
     canPlan && selectedCard && selectedCard.kind !== 'move'
-      ? validShootCells(selectedCard.kind, origin, carton, state.mapObjects)
+      ? validShootCells(selectedCard.kind, origin, carton, blockers)
       : [];
 
   const walkTones = useMemo(() => {
@@ -656,36 +714,36 @@ export function Arena({
         const key = `${cell.row},${cell.col}`;
         if (tone === 'active' || tones.get(key) !== 'active') tones.set(key, tone);
       };
-      const fan = weaponFanCells(action.weapon, from, action.dir, carton, state.mapObjects);
+      const fan = weaponFanCells(action.weapon, from, action.dir, carton, blockers);
       if (fan) {
         for (const cell of fan) mark(cell);
         return;
       }
       if (action.weapon === 'bomb') {
         const end = bombLandingCell(from, action.dir, carton);
-        if (end && !isObjectCell(end, state.mapObjects)) {
+        if (end && !isObjectCell(end, blockers)) {
           mark(end);
-          for (const cell of bombSplashCells(end, carton, state.mapObjects)) mark(cell);
+          for (const cell of bombSplashCells(end, carton, blockers)) mark(cell);
         }
         return;
       }
       const ray = shotRayCells(
         from,
         action.dir,
-        state.mapObjects,
+        blockers,
         carton,
         WEAPON_STATS[action.weapon].range,
       );
       for (const cell of ray) mark(cell);
     });
     return tones;
-  }, [draft, slot, local, editingShoot, state.mapObjects, carton]);
+  }, [draft, slot, local, editingShoot, blockers, carton]);
 
   const cardIds: [string, string] | null =
     slotCards[0] && slotCards[1] ? [slotCards[0], slotCards[1]] : null;
   const legalPlan =
     local && cardIds
-      ? parseAndValidatePlan(local, resolvedDraft, cardIds, state.mapObjects, carton)
+      ? parseAndValidatePlan(local, resolvedDraft, cardIds, blockers, carton)
       : null;
   const beatNumbers = useMemo(() => {
     if (!local) return new Map<string, number>();
@@ -794,7 +852,7 @@ export function Arena({
       if (cellsEqual(cell, origin)) {
         if (draft[slot]?.type === 'walk') {
           if (walkPath.length >= maxWalkFor(slot)) return;
-          if (!isAdjacent8(walkTip, cell) || isObjectCell(cell, state.mapObjects)) return;
+          if (!isAdjacent8(walkTip, cell) || isObjectCell(cell, blockers)) return;
           setAction(slot, walkAction([...walkPath, cell], currentDelay));
           return;
         }
@@ -802,14 +860,14 @@ export function Arena({
         return;
       }
       if (sittingSlot(slot)) {
-        if (!isAdjacent8(origin, cell) || !isOnBoard(cell, carton) || isObjectCell(cell, state.mapObjects)) {
+        if (!isAdjacent8(origin, cell) || !isOnBoard(cell, carton) || isObjectCell(cell, blockers)) {
           return;
         }
         setAction(slot, walkAction([cell], 1));
         return;
       }
       if (walkPath.length >= maxWalkFor(slot)) return;
-      if (!isAdjacent8(walkTip, cell) || !isOnBoard(cell, carton) || isObjectCell(cell, state.mapObjects)) {
+      if (!isAdjacent8(walkTip, cell) || !isOnBoard(cell, carton) || isObjectCell(cell, blockers)) {
         return;
       }
       setAction(slot, walkAction([...walkPath, cell], currentDelay));
@@ -829,7 +887,7 @@ export function Arena({
       if (!dir) return;
       const ray = bombThrowCells(origin, dir, carton);
       if (!ray.some((step) => cellsEqual(step, cell))) return;
-      if (isObjectCell(cell, state.mapObjects)) return;
+      if (isObjectCell(cell, blockers)) return;
       setAction(slot, { type: 'shoot', weapon: 'bomb', dir, steps: WEAPON_STATS.bomb.range });
       return;
     }
@@ -839,7 +897,7 @@ export function Arena({
     const ray = shotRayCells(
       origin,
       dir,
-      state.mapObjects,
+      blockers,
       carton,
       WEAPON_STATS[selectedCard.kind].range,
     );
@@ -866,7 +924,7 @@ export function Arena({
 
   const submitDraftOrSit = () => {
     if (!local || !localAlive || local.planSubmitted || localLocked) return;
-    const completed = completePartialPlan(local, resolvedDraft, slotCards, state.mapObjects, carton);
+    const completed = completePartialPlan(local, resolvedDraft, slotCards, blockers, carton);
     if (!completed) return;
     setLocalLocked(true);
     onSubmitPlan(completed);
@@ -898,19 +956,23 @@ export function Arena({
     const startTokens = tokensFromSnapshot(state, replay.roundStart);
     const startStains = replay.startEggStains ?? [];
     const startPresents = replay.startPresents ?? [];
+    const startHazard = hazardFromIndex(replay.startShrinkIndex ?? 0, carton);
     setTokens(startTokens);
     setStains(startStains);
     setPresents(startPresents);
+    setHazard(startHazard);
     void (async () => {
       await runPlayback({
         timeline: replay.timeline,
         startTokens,
         startStains,
         startPresents,
+        startHazard,
         cancelled: () => watchGen.current !== gen,
         setTokens,
         setStains,
         setPresents,
+        setHazard,
         setBeams,
         setBumps,
         setFlashIds,
@@ -922,6 +984,7 @@ export function Arena({
       setTokens(tokensFromState(state));
       setStains(state.eggStains ?? []);
       setPresents(state.presents ?? []);
+      setHazard(hazardFromIndex(state.shrinkIndex ?? 0, carton));
       setBeams([]);
       setBumps({});
       setFlashIds([]);
@@ -943,6 +1006,9 @@ export function Arena({
     !watchingLast;
 
   const walkHint = carton.maxPresents > 0 ? PLANNER_HINT_WALK : PLANNER_HINT_WALK_NO_PRESENT;
+  const onClosingSquare = Boolean(
+    local && hazard.warning.some((cell) => cellsEqual(local, cell)),
+  );
   const plannerHint = !localAlive
     ? 'You’re scrambled. Watch the rest of the carton.'
     : local?.planSubmitted || localLocked
@@ -951,6 +1017,8 @@ export function Arena({
         ? status || 'Watching the last scramble…'
         : !planning
           ? status || 'Watching the carton…'
+          : onClosingSquare
+            ? 'This square fries next — walk off it.'
           : selectedCard?.kind === 'move'
             ? walkHint
             : selectedCard?.kind === 'slap'
@@ -1018,6 +1086,8 @@ export function Arena({
               validWalk.some((step) => cellsEqual(step, cell)) ||
               validShoot.some((step) => cellsEqual(step, cell));
             const isOrigin = canPlan && cellsEqual(origin, cell);
+            const isClosed = hazard.destroyed.some((closed) => cellsEqual(closed, cell));
+            const isWarn = hazard.warning.some((warned) => cellsEqual(warned, cell));
             const hasBlock = isObjectCell(cell, state.mapObjects);
             const hasPresent = presents.some((present) => cellsEqual(present, cell));
             const occupants = tokensByCell.get(cellKey) ?? [];
@@ -1040,7 +1110,9 @@ export function Arena({
                   isValid ? ' is-valid' : ''
                 }${isOrigin ? ' is-origin' : ''}${beamTint ? ' on-beam' : ''}${
                   hasBlock ? ' has-block' : ''
-                }${occupants.length > 0 ? ' has-egg' : ''}${hasPresent ? ' has-present' : ''}`}
+                }${occupants.length > 0 ? ' has-egg' : ''}${hasPresent ? ' has-present' : ''}${
+                  isWarn ? ' is-warn' : ''
+                }${isClosed ? ' is-closed' : ''}`}
                 style={
                   {
                     '--cell-row': row,
@@ -1048,9 +1120,9 @@ export function Arena({
                   } as React.CSSProperties
                 }
                 onClick={() => handleCellClick(cell)}
-                disabled={!canPlan}
+                disabled={!canPlan || isClosed}
               >
-                {pathIndex > 0 && <span className="path-index">{pathIndex}</span>}
+                {pathIndex > 0 && !isClosed && <span className="path-index">{pathIndex}</span>}
                 {hasBlock && <BlockMark />}
                 {hasPresent && <PresentMark />}
                 {occupants.every((token) => token.hp > 0) &&

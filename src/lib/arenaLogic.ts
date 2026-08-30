@@ -228,6 +228,8 @@ const PLAYBACK_MS: Record<PlaybackEvent['type'], number> = {
   eggStain: 0,
   blocked: 400,
   pickup: 280,
+  shrinkWarn: 420,
+  shrinkDestroy: 450,
 };
 
 export function playerColor(joinOrder: number): string {
@@ -277,6 +279,94 @@ export function isOnBoard(cell: Cell, carton: CartonSpec): boolean {
     cell.col >= 0 &&
     cell.col < carton.cols
   );
+}
+
+export function cartonShrinks(carton: CartonSpec): boolean {
+  return carton.type === 'full';
+}
+
+export function shrinkRings(carton: CartonSpec): Cell[][] {
+  const rings: Cell[][] = [];
+  let top = 0;
+  let left = 0;
+  let bottom = carton.rows - 1;
+  let right = carton.cols - 1;
+  while (top <= bottom && left <= right) {
+    const ring: Cell[] = [];
+    for (let col = left; col <= right; col += 1) ring.push({ row: top, col });
+    for (let row = top + 1; row <= bottom; row += 1) ring.push({ row, col: right });
+    if (top < bottom) {
+      for (let col = right - 1; col >= left; col -= 1) ring.push({ row: bottom, col });
+    }
+    if (left < right) {
+      for (let row = bottom - 1; row > top; row -= 1) ring.push({ row, col: left });
+    }
+    rings.push(ring);
+    top += 1;
+    left += 1;
+    bottom -= 1;
+    right -= 1;
+  }
+  return rings;
+}
+
+export const SHRINK_LANE_INDEX = 4;
+const SHRINK_LANE_WARN_INDEX = 3;
+const SHRINK_LANE_ROWS = 2;
+const SHRINK_LANE_COLS = 3;
+
+export function shrinkSafeLane(carton: CartonSpec): Cell[] {
+  const height = Math.min(SHRINK_LANE_ROWS, carton.rows);
+  const width = Math.min(SHRINK_LANE_COLS, carton.cols);
+  const row0 = Math.floor((carton.rows - height) / 2);
+  const col0 = Math.floor((carton.cols - width) / 2);
+  const cells: Cell[] = [];
+  for (let row = row0; row < row0 + height; row += 1) {
+    for (let col = col0; col < col0 + width; col += 1) {
+      cells.push({ row, col });
+    }
+  }
+  return cells;
+}
+
+function shrinkLaneCutCells(carton: CartonSpec): Cell[] {
+  const safe = new Set(shrinkSafeLane(carton).map((cell) => `${cell.row},${cell.col}`));
+  return shrinkRings(carton)
+    .slice(2)
+    .flat()
+    .filter((cell) => !safe.has(`${cell.row},${cell.col}`))
+    .sort((a, b) => (a.row !== b.row ? a.row - b.row : a.col - b.col));
+}
+
+export function shrinkDestroyedCells(index: number, carton: CartonSpec): Cell[] {
+  if (!cartonShrinks(carton) || index <= 1) return [];
+  if (index >= SHRINK_LANE_INDEX) {
+    const safe = new Set(shrinkSafeLane(carton).map((cell) => `${cell.row},${cell.col}`));
+    const destroyed: Cell[] = [];
+    for (let row = 0; row < carton.rows; row += 1) {
+      for (let col = 0; col < carton.cols; col += 1) {
+        if (!safe.has(`${row},${col}`)) destroyed.push({ row, col });
+      }
+    }
+    return destroyed;
+  }
+  return shrinkRings(carton).slice(0, index - 1).flat();
+}
+
+export function shrinkWarningCells(index: number, carton: CartonSpec): Cell[] {
+  if (!cartonShrinks(carton) || index <= 0 || index >= SHRINK_LANE_INDEX) return [];
+  if (index === SHRINK_LANE_WARN_INDEX) return shrinkLaneCutCells(carton);
+  return shrinkRings(carton)[index - 1] ?? [];
+}
+
+export function closedMapObjects(
+  mapObjects: Cell[],
+  shrinkIndex: number,
+  carton: CartonSpec,
+): Cell[] {
+  const destroyed = shrinkDestroyedCells(shrinkIndex, carton);
+  if (destroyed.length === 0) return mapObjects;
+  return [...mapObjects, ...destroyed];
 }
 
 export function isObjectCell(cell: Cell, mapObjects: Cell[]): boolean {
@@ -567,6 +657,8 @@ export function emptyArenaFields(): Pick<
   | 'mapObjects'
   | 'eggStains'
   | 'presents'
+  | 'shrinkIndex'
+  | 'startedPlayerCount'
   | 'planDeadlineAt'
 > {
   return {
@@ -579,6 +671,8 @@ export function emptyArenaFields(): Pick<
     mapObjects: [],
     eggStains: [],
     presents: [],
+    shrinkIndex: 0,
+    startedPlayerCount: 0,
     planDeadlineAt: null,
   };
 }
@@ -620,6 +714,8 @@ export function startArenaMatch(state: GameState): GameState {
     mapObjects,
     eggStains: [],
     presents: [],
+    shrinkIndex: 0,
+    startedPlayerCount: players.length,
     players,
     planDeadlineAt: Date.now() + PLAN_TIME_MS,
   };
@@ -679,6 +775,7 @@ export interface ResolveResult {
   outcome: MatchOutcome;
   eggStains: Cell[];
   presents: Cell[];
+  shrinkIndex: number;
 }
 
 function living(players: Player[]): Player[] {
@@ -931,6 +1028,20 @@ function isPresentBlocked(
   return players.some((player) => cellsEqual(player, cell));
 }
 
+const PRESENT_SPAWN_DISTANCE = 2;
+
+function cellsAtChebyshev(from: Cell, distance: number, carton: CartonSpec): Cell[] {
+  const cells: Cell[] = [];
+  for (let dr = -distance; dr <= distance; dr += 1) {
+    for (let dc = -distance; dc <= distance; dc += 1) {
+      if (Math.max(Math.abs(dr), Math.abs(dc)) !== distance) continue;
+      const cell = { row: from.row + dr, col: from.col + dc };
+      if (isOnBoard(cell, carton)) cells.push(cell);
+    }
+  }
+  return cells;
+}
+
 export function pickPresentSpawn(
   players: Player[],
   mapObjects: Cell[],
@@ -938,29 +1049,16 @@ export function pickPresentSpawn(
   carton: CartonSpec,
 ): Cell | null {
   if (presents.length >= carton.maxPresents) return null;
-  const adjacent: Cell[] = [];
+  const pool: Cell[] = [];
   const seen = new Set<string>();
   for (const player of living(players)) {
-    for (const cell of neighbors8(player, carton)) {
+    for (const cell of cellsAtChebyshev(player, PRESENT_SPAWN_DISTANCE, carton)) {
       const key = `${cell.row},${cell.col}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      if (!isPresentBlocked(cell, players, mapObjects, presents)) adjacent.push(cell);
+      if (!isPresentBlocked(cell, players, mapObjects, presents)) pool.push(cell);
     }
   }
-  const pool =
-    adjacent.length > 0
-      ? adjacent
-      : (() => {
-          const open: Cell[] = [];
-          for (let row = 0; row < carton.rows; row += 1) {
-            for (let col = 0; col < carton.cols; col += 1) {
-              const cell = { row, col };
-              if (!isPresentBlocked(cell, players, mapObjects, presents)) open.push(cell);
-            }
-          }
-          return open;
-        })();
   if (pool.length === 0) return null;
   return pool[Math.floor(Math.random() * pool.length)] ?? null;
 }
@@ -1007,6 +1105,62 @@ function collectPresents(
   return { players: nextPlayers, presents: nextPresents };
 }
 
+const DUEL_SHRINK_ROUND = 3;
+
+function applyEndOfRoundShrink(
+  players: Player[],
+  presents: Cell[],
+  timeline: PlaybackEvent[],
+  shrinkIndex: number,
+  carton: CartonSpec,
+  round: number,
+  startedPlayerCount: number,
+): { players: Player[]; presents: Cell[]; shrinkIndex: number } {
+  if (!cartonShrinks(carton) || living(players).length !== 2) {
+    return { players, presents, shrinkIndex };
+  }
+  if (
+    shrinkIndex === 0 &&
+    startedPlayerCount <= 2 &&
+    round < DUEL_SHRINK_ROUND
+  ) {
+    return { players, presents, shrinkIndex };
+  }
+  if (shrinkIndex >= SHRINK_LANE_INDEX) {
+    return { players, presents, shrinkIndex };
+  }
+
+  const nextIndex = shrinkIndex + 1;
+  let nextPlayers = players;
+  const nextPresents = presents;
+
+  if (shrinkIndex >= 1) {
+    const doomed = shrinkWarningCells(shrinkIndex, carton);
+    if (doomed.length > 0) {
+      timeline.push({ type: 'shrinkDestroy', cells: doomed });
+      const killed: string[] = [];
+      nextPlayers = nextPlayers.map((player) => {
+        if (!isAlive(player) || !doomed.some((closed) => cellsEqual(closed, player))) {
+          return player;
+        }
+        killed.push(player.id);
+        return { ...player, hp: 0 };
+      });
+      for (const playerId of killed) {
+        timeline.push({ type: 'hit', playerId, hpAfter: 0 });
+        timeline.push({ type: 'death', playerId });
+      }
+    }
+  }
+
+  const warned = shrinkWarningCells(nextIndex, carton);
+  if (warned.length > 0) {
+    timeline.push({ type: 'shrinkWarn', cells: warned });
+  }
+
+  return { players: nextPlayers, presents: nextPresents, shrinkIndex: nextIndex };
+}
+
 export function resolveRound(
   players: Player[],
   plans: Map<string, [ArenaAction, ArenaAction]>,
@@ -1014,11 +1168,15 @@ export function resolveRound(
   eggStains: Cell[] = [],
   presents: Cell[] = [],
   carton: CartonSpec,
+  shrinkIndex = 0,
+  round = 1,
+  startedPlayerCount = players.length,
 ): ResolveResult {
   let nextPlayers = players.map((player) => ({ ...player }));
   const timeline: PlaybackEvent[] = [];
   const nextStains = eggStains.map((cell) => ({ ...cell }));
   let nextPresents = presents.map((cell) => ({ ...cell }));
+  const closed = closedMapObjects(mapObjects, shrinkIndex, carton);
 
   const takePresents = () => {
     const collected = collectPresents(nextPlayers, nextPresents, timeline);
@@ -1055,7 +1213,7 @@ export function resolveRound(
         const from = { row: player.row, col: player.col };
         const damages = new Map<string, number>();
 
-        const fan = weaponFanCells(action.weapon, from, action.dir, carton, mapObjects);
+        const fan = weaponFanCells(action.weapon, from, action.dir, carton, closed);
         if (fan) {
           const struck = fan
             .map((cell) => occupantAt(snapshot, cell, player.id))
@@ -1090,8 +1248,8 @@ export function resolveRound(
         if (action.weapon === 'bomb') {
           const stats = WEAPON_STATS.bomb;
           const end = bombLandingCell(from, action.dir, carton);
-          if (!end || isObjectCell(end, mapObjects)) continue;
-          const splash = bombSplashCells(end, carton, mapObjects);
+          if (!end || isObjectCell(end, closed)) continue;
+          const splash = bombSplashCells(end, carton, closed);
           const landed = occupantAt(snapshot, end);
           if (landed) recordDamage(damages, landed.id, stats.damage);
           for (const cell of splash) {
@@ -1122,7 +1280,7 @@ export function resolveRound(
           from,
           action.dir,
           player.id,
-          mapObjects,
+          closed,
           stats.range,
           carton,
         );
@@ -1184,7 +1342,7 @@ export function resolveRound(
         if (
           !step ||
           !isOnBoard(step, carton) ||
-          isObjectCell(step, mapObjects) ||
+          isObjectCell(step, closed) ||
           !isAdjacent8(from, step)
         ) {
           walkStopped.add(player.id);
@@ -1193,7 +1351,7 @@ export function resolveRound(
         return { id: player.id, from, to: step };
       });
 
-      nextPlayers = resolveMovement(nextPlayers, intents, timeline, mapObjects, nextStains);
+      nextPlayers = resolveMovement(nextPlayers, intents, timeline, closed, nextStains);
 
       for (const intent of intents) {
         if (cellsEqual(intent.from, intent.to)) continue;
@@ -1211,12 +1369,25 @@ export function resolveRound(
     takePresents();
   }
 
+  const shrunk = applyEndOfRoundShrink(
+    nextPlayers,
+    nextPresents,
+    timeline,
+    shrinkIndex,
+    carton,
+    round,
+    startedPlayerCount,
+  );
+  nextPlayers = shrunk.players;
+  nextPresents = shrunk.presents;
+
   return {
     players: nextPlayers.map((player) => ({ ...player, planSubmitted: false })),
     timeline,
     outcome: outcomeFrom(nextPlayers),
     eggStains: nextStains,
     presents: nextPresents,
+    shrinkIndex: shrunk.shrinkIndex,
   };
 }
 
@@ -1224,9 +1395,12 @@ export function applyResolvedRound(state: GameState, result: ResolveResult): Gam
   const roundStart = snapshotTokens(state.players);
   const startPresents = (state.presents ?? []).map((cell) => ({ ...cell }));
   const carton = cartonSpec(state.cartonType);
+  const startShrinkIndex = state.shrinkIndex ?? 0;
+  const shrinkIndex = result.shrinkIndex;
+  const blockers = closedMapObjects(state.mapObjects, shrinkIndex, carton);
   const presents =
     result.outcome.kind === 'none'
-      ? spawnEndOfTurnPresent(result.players, state.mapObjects, result.presents, carton)
+      ? spawnEndOfTurnPresent(result.players, blockers, result.presents, carton)
       : result.presents;
   return {
     ...state,
@@ -1241,9 +1415,11 @@ export function applyResolvedRound(state: GameState, result: ResolveResult): Gam
       roundStart,
       startEggStains: (state.eggStains ?? []).map((cell) => ({ ...cell })),
       startPresents,
+      startShrinkIndex,
     },
     eggStains: result.eggStains,
     presents,
+    shrinkIndex,
     players: result.players,
     planDeadlineAt: null,
   };
@@ -1273,7 +1449,13 @@ export function groupTimeline(timeline: PlaybackEvent[]): PlaybackEvent[][] {
 
   for (const event of timeline) {
     const kind = kindOf(event);
-    if (kind === 'actionStart' || kind === 'beat' || kind === 'shot') {
+    if (
+      kind === 'actionStart' ||
+      kind === 'beat' ||
+      kind === 'shot' ||
+      kind === 'shrinkWarn' ||
+      kind === 'shrinkDestroy'
+    ) {
       if (current.length > 0) {
         frames.push(current);
         current = [];

@@ -10,6 +10,12 @@ import {
   parseAndValidatePlan,
   playerColor,
   resolveRound,
+  pickPresentSpawn,
+  shrinkDestroyedCells,
+  shrinkRings,
+  shrinkSafeLane,
+  shrinkWarningCells,
+  SHRINK_LANE_INDEX,
   startArenaMatch,
 } from './arenaLogic';
 import { createHostLobbyState, createInitialPlayer } from './gameLogic';
@@ -435,5 +441,235 @@ describe('mixColors', () => {
 
   it('averages two player hues', () => {
     expect(mixColors([playerColor(0), playerColor(1)])).toBe('#ded6df');
+  });
+});
+
+describe('closing carton', () => {
+  const half = cartonSpec('halfDozen');
+
+  function stayPlans(...ids: string[]) {
+    return new Map(ids.map((id) => [id, stayStay()]));
+  }
+
+  it('closes one full border ring at a time', () => {
+    const rings = shrinkRings(carton);
+    expect(rings).toHaveLength(4);
+    expect(rings[0]).toHaveLength(24);
+    expect(rings[0]?.some((cell) => cell.row === 0 && cell.col === 0)).toBe(true);
+    expect(rings[0]?.some((cell) => cell.row === 0 && cell.col === 3)).toBe(true);
+    expect(rings[0]?.some((cell) => cell.row === 3 && cell.col === 0)).toBe(true);
+    expect(rings[0]?.some((cell) => cell.row === 3 && cell.col === 3)).toBe(false);
+    expect(shrinkWarningCells(1, carton)).toHaveLength(24);
+    expect(shrinkDestroyedCells(1, carton)).toEqual([]);
+    expect(shrinkDestroyedCells(2, carton)).toHaveLength(24);
+    expect(shrinkWarningCells(2, carton)).toHaveLength(16);
+    expect(shrinkWarningCells(3, carton)).toEqual([
+      { row: 4, col: 2 },
+      { row: 4, col: 3 },
+      { row: 4, col: 4 },
+    ]);
+    expect(shrinkDestroyedCells(3, carton)).toHaveLength(40);
+  });
+
+  it('waits until the third scramble in a two-egg start', () => {
+    const a = makePlayer({ id: 'a', row: 3, col: 3 });
+    const b = makePlayer({ id: 'b', row: 3, col: 4, joinOrder: 1 });
+    const early = resolveRound([a, b], stayPlans('a', 'b'), [], [], [], carton, 0, 1, 2);
+    expect(early.shrinkIndex).toBe(0);
+    expect(early.timeline.some((event) => event.type === 'shrinkWarn')).toBe(false);
+
+    const second = resolveRound([a, b], stayPlans('a', 'b'), [], [], [], carton, 0, 2, 2);
+    expect(second.shrinkIndex).toBe(0);
+
+    const third = resolveRound([a, b], stayPlans('a', 'b'), [], [], [], carton, 0, 3, 2);
+    expect(third.shrinkIndex).toBe(1);
+    const warn = third.timeline.find((event) => event.type === 'shrinkWarn');
+    expect(warn?.type === 'shrinkWarn' ? warn.cells : []).toHaveLength(24);
+  });
+
+  it('closes straight away when a bigger carton is down to two eggs', () => {
+    const a = makePlayer({ id: 'a', row: 3, col: 3 });
+    const b = makePlayer({ id: 'b', row: 3, col: 4, joinOrder: 1 });
+    const fried = makePlayer({ id: 'c', row: 6, col: 6, joinOrder: 2, hp: 0 });
+    const result = resolveRound(
+      [a, b, fried],
+      stayPlans('a', 'b'),
+      [],
+      [],
+      [],
+      carton,
+      0,
+      1,
+      3,
+    );
+    expect(result.shrinkIndex).toBe(1);
+    expect(result.timeline.some((event) => event.type === 'shrinkWarn')).toBe(true);
+  });
+
+  it('destroys the warned border next and fries anyone still on it', () => {
+    const doomed = makePlayer({ id: 'a', row: 0, col: 0, hp: 3 });
+    const safe = makePlayer({ id: 'b', row: 3, col: 3, joinOrder: 1 });
+    const result = resolveRound([doomed, safe], stayPlans('a', 'b'), [], [], [], carton, 1);
+    expect(result.shrinkIndex).toBe(2);
+    expect(result.players.find((player) => player.id === 'a')?.hp).toBe(0);
+    expect(result.players.find((player) => player.id === 'b')?.hp).toBe(3);
+    expect(result.outcome).toEqual({ kind: 'winner', playerId: 'b' });
+    const kinds = result.timeline.map((event) => event.type);
+    expect(kinds).toContain('shrinkDestroy');
+    expect(kinds).toContain('death');
+    expect(kinds).toContain('shrinkWarn');
+    expect(kinds.indexOf('shrinkDestroy')).toBeLessThan(kinds.indexOf('shrinkWarn'));
+  });
+
+  it('lets an egg walk off the warning before it closes', () => {
+    const runner = makePlayer({
+      id: 'a',
+      row: 0,
+      col: 0,
+      hand: cards('move', 'pistol'),
+    });
+    const other = makePlayer({ id: 'b', row: 3, col: 3, joinOrder: 1 });
+    const result = resolveRound(
+      [runner, other],
+      new Map([
+        [
+          'a',
+          [
+            { type: 'walk', path: [{ row: 1, col: 1 }] },
+            { type: 'stay' },
+          ],
+        ],
+        ['b', stayStay()],
+      ]),
+      [],
+      [],
+      [],
+      carton,
+      1,
+    );
+    expect(result.players.find((player) => player.id === 'a')?.hp).toBe(3);
+    expect(result.players.find((player) => player.id === 'a')).toMatchObject({ row: 1, col: 1 });
+    expect(result.outcome).toEqual({ kind: 'none' });
+  });
+
+  it('blocks walking onto a destroyed square', () => {
+    const walker = makePlayer({
+      id: 'a',
+      row: 1,
+      col: 1,
+      hand: cards('move', 'pistol'),
+    });
+    const blocked = parseAndValidatePlan(
+      walker,
+      [
+        { type: 'walk', path: [{ row: 0, col: 0 }] },
+        { type: 'stay' },
+      ],
+      ['card-0', 'card-1'],
+      [{ row: 0, col: 0 }],
+      carton,
+    );
+    expect(blocked).toBeNull();
+  });
+
+  it('does not close on the half-dozen carton or while three eggs remain', () => {
+    const a = makePlayer({ id: 'a', row: 0, col: 0 });
+    const b = makePlayer({ id: 'b', row: 1, col: 2, joinOrder: 1 });
+    const halfResult = resolveRound([a, b], stayPlans('a', 'b'), [], [], [], half);
+    expect(halfResult.shrinkIndex).toBe(0);
+    expect(halfResult.timeline.some((event) => event.type === 'shrinkWarn')).toBe(false);
+
+    const c = makePlayer({ id: 'c', row: 6, col: 6, joinOrder: 2 });
+    const trio = resolveRound(
+      [a, b, c],
+      stayPlans('a', 'b', 'c'),
+      [],
+      [],
+      [],
+      carton,
+    );
+    expect(trio.shrinkIndex).toBe(0);
+    expect(trio.timeline.some((event) => event.type === 'shrinkWarn')).toBe(false);
+  });
+
+  it('warns the bottom three of the 3×3 before opening the 2×3 lane', () => {
+    const a = makePlayer({ id: 'a', row: 3, col: 3 });
+    const b = makePlayer({ id: 'b', row: 4, col: 3, joinOrder: 1 });
+    const result = resolveRound([a, b], stayPlans('a', 'b'), [], [], [], carton, 2);
+    expect(result.shrinkIndex).toBe(3);
+    const warn = result.timeline.find((event) => event.type === 'shrinkWarn');
+    expect(warn?.type === 'shrinkWarn' ? warn.cells : []).toEqual([
+      { row: 4, col: 2 },
+      { row: 4, col: 3 },
+      { row: 4, col: 4 },
+    ]);
+    expect(result.players.find((player) => player.id === 'a')?.hp).toBe(3);
+    expect(result.players.find((player) => player.id === 'b')?.hp).toBe(3);
+    expect(result.players.find((player) => player.id === 'b')).toMatchObject({ row: 4, col: 3 });
+  });
+
+  it('opens a 2×3 lane after the bottom three go black', () => {
+    const a = makePlayer({ id: 'a', row: 3, col: 3 });
+    const b = makePlayer({ id: 'b', row: 2, col: 4, joinOrder: 1 });
+    const result = resolveRound([a, b], stayPlans('a', 'b'), [], [], [], carton, 3);
+    expect(result.shrinkIndex).toBe(SHRINK_LANE_INDEX);
+    expect(result.timeline.some((event) => event.type === 'shrinkDestroy')).toBe(true);
+    expect(result.timeline.some((event) => event.type === 'shrinkWarn')).toBe(false);
+    const lane = shrinkSafeLane(carton);
+    expect(lane).toHaveLength(6);
+    expect(lane).toEqual(
+      expect.arrayContaining([
+        { row: 2, col: 2 },
+        { row: 2, col: 4 },
+        { row: 3, col: 2 },
+        { row: 3, col: 4 },
+      ]),
+    );
+    expect(result.players.find((player) => player.id === 'a')).toMatchObject({ row: 3, col: 3 });
+    expect(result.players.find((player) => player.id === 'b')).toMatchObject({ row: 2, col: 4 });
+    expect(result.players.every((player) => player.hp === 3)).toBe(true);
+  });
+
+  it('fries an egg that stays on the bottom three when the lane closes', () => {
+    const a = makePlayer({ id: 'a', row: 3, col: 3 });
+    const b = makePlayer({ id: 'b', row: 4, col: 3, joinOrder: 1 });
+    const result = resolveRound([a, b], stayPlans('a', 'b'), [], [], [], carton, 3);
+    expect(result.shrinkIndex).toBe(SHRINK_LANE_INDEX);
+    expect(result.players.find((player) => player.id === 'b')?.hp).toBe(0);
+    expect(result.outcome).toEqual({ kind: 'winner', playerId: 'a' });
+  });
+
+  it('does not close further after the lane opens', () => {
+    const a = makePlayer({ id: 'a', row: 3, col: 3 });
+    const b = makePlayer({ id: 'b', row: 3, col: 4, joinOrder: 1 });
+    const result = resolveRound([a, b], stayPlans('a', 'b'), [], [], [], carton, SHRINK_LANE_INDEX);
+    expect(result.shrinkIndex).toBe(SHRINK_LANE_INDEX);
+    expect(
+      result.timeline.some(
+        (event) => event.type === 'shrinkWarn' || event.type === 'shrinkDestroy',
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('present spawn', () => {
+  it('only offers a cell two squares from a living egg', () => {
+    const a = makePlayer({ id: 'a', row: 3, col: 3 });
+    const spawned = pickPresentSpawn([a], [], [], carton);
+    expect(spawned).not.toBeNull();
+    if (!spawned) return;
+    expect(Math.max(Math.abs(spawned.row - 3), Math.abs(spawned.col - 3))).toBe(2);
+  });
+
+  it('spawns nothing when every two-square cell is blocked', () => {
+    const a = makePlayer({ id: 'a', row: 3, col: 3 });
+    const ring: { row: number; col: number }[] = [];
+    for (let dr = -2; dr <= 2; dr += 1) {
+      for (let dc = -2; dc <= 2; dc += 1) {
+        if (Math.max(Math.abs(dr), Math.abs(dc)) !== 2) continue;
+        ring.push({ row: 3 + dr, col: 3 + dc });
+      }
+    }
+    expect(pickPresentSpawn([a], ring, [], carton)).toBeNull();
   });
 });

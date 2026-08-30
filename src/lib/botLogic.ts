@@ -9,6 +9,7 @@ import {
   type WeaponKind,
 } from '../types/game';
 import {
+  cellsEqual,
   directionFromRay,
   isAlive,
   isCardinalWeapon,
@@ -18,6 +19,7 @@ import {
   neighbors8,
   plannedPositionAfter,
   shotRayCells,
+  shrinkWarningCells,
   weaponFanCells,
   WEAPON_STATS,
 } from './arenaLogic';
@@ -114,20 +116,25 @@ function walkToward(
   selfId: string,
   mapObjects: Cell[],
   carton: CartonSpec,
+  avoid: Cell[] = [],
 ): ArenaAction {
   const stepsWanted = Math.min(MAX_WALK_STEPS, Math.max(1, chebyshev(from, target)));
   const path: Cell[] = [];
   let cursor = from;
 
   for (let step = 0; step < stepsWanted; step += 1) {
-    const options = neighbors8(cursor, carton)
-      .filter((cell) => !occupiedByOthers(cell, others, selfId, mapObjects))
-      .sort((a, b) => {
-        const da = chebyshev(a, target);
-        const db = chebyshev(b, target);
-        if (da !== db) return da - db;
-        return Math.random() - 0.5;
-      });
+    const open = neighbors8(cursor, carton).filter(
+      (cell) => !occupiedByOthers(cell, others, selfId, mapObjects),
+    );
+    const preferred = avoid.length
+      ? open.filter((cell) => !avoid.some((blocked) => cellsEqual(blocked, cell)))
+      : open;
+    const options = (preferred.length > 0 ? preferred : open).sort((a, b) => {
+      const da = chebyshev(a, target);
+      const db = chebyshev(b, target);
+      if (da !== db) return da - db;
+      return Math.random() - 0.5;
+    });
 
     const next = options[0];
     if (!next || (next.row === cursor.row && next.col === cursor.col)) break;
@@ -163,6 +170,7 @@ export function chooseBotPlan(
   mapObjects: Cell[],
   presents: Cell[] = [],
   carton: CartonSpec,
+  shrinkIndex = 0,
 ): { cardIds: [string, string]; actions: [ArenaAction, ArenaAction] } {
   const moveCard = bot.hand.find((card) => card.kind === 'move');
   const actionCards = bot.hand.filter((card) => card.kind !== 'move');
@@ -171,12 +179,25 @@ export function chooseBotPlan(
     return { cardIds: [bot.hand[0]?.id ?? '', bot.hand[1]?.id ?? ''], actions: fallbackStay };
   }
 
+  const warning = shrinkWarningCells(shrinkIndex, carton);
+  const inward = {
+    row: Math.floor(carton.rows / 2),
+    col: Math.floor(carton.cols / 2),
+  };
+
   const nearestPresent = (from: Cell): Cell | null => {
     if (presents.length === 0) return null;
     return [...presents].sort((a, b) => chebyshev(from, a) - chebyshev(from, b))[0] ?? null;
   };
 
   const pickSlot = (from: Cell, usedActionId: string | null): { cardId: string; action: ArenaAction } => {
+    const onWarning = warning.some((cell) => cellsEqual(from, cell));
+    if (onWarning) {
+      return {
+        cardId: moveCard.id,
+        action: walkToward(from, inward, players, bot.id, mapObjects, carton, warning),
+      };
+    }
     const enemy = nearestEnemy(from, players, bot.id);
     const unused = actionCards.filter(
       (card) => card.id !== usedActionId || isReusableCard(card),
@@ -192,7 +213,10 @@ export function chooseBotPlan(
     const present = !bot.spareWeapon ? nearestPresent(from) : null;
     const walkTarget = present ?? enemy;
     if (walkTarget) {
-      return { cardId: moveCard.id, action: walkToward(from, walkTarget, players, bot.id, mapObjects, carton) };
+      return {
+        cardId: moveCard.id,
+        action: walkToward(from, walkTarget, players, bot.id, mapObjects, carton, warning),
+      };
     }
     return { cardId: moveCard.id, action: { type: 'stay' } };
   };
